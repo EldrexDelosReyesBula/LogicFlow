@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { clsx } from 'clsx';
-import { Sparkles, Play, Delete } from 'lucide-react';
+import { Sparkles, Play, Delete, ArrowRight } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
 interface ExpressionInputProps {
@@ -21,12 +21,13 @@ const SYMBOLS = [
   { char: ')', label: ')' },
   { char: '[', label: '[' },
   { char: ']', label: ']' },
-  { char: '{', label: '{' },
-  { char: '}', label: '}' },
+  { char: '0', label: '0' },
+  { char: '1', label: '1' },
 ];
 
 const ExpressionInput: React.FC<ExpressionInputProps> = ({ value, onChange, onGenerate, isValid }) => {
   const [isFocused, setIsFocused] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && isValid) {
@@ -34,19 +35,51 @@ const ExpressionInput: React.FC<ExpressionInputProps> = ({ value, onChange, onGe
     }
   };
 
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const val = e.target.value;
+    const selectionStart = e.target.selectionStart;
+    
+    // Auto-pairing logic detection
+    if (inputRef.current && selectionStart !== null) {
+       const charEntered = val.slice(selectionStart - 1, selectionStart);
+       if (['(', '[', '{'].includes(charEntered)) {
+           const pair = charEntered === '(' ? ')' : charEntered === '[' ? ']' : '}';
+           const newVal = val.slice(0, selectionStart) + pair + val.slice(selectionStart);
+           onChange(newVal);
+           // We need to restore cursor position after render
+           requestAnimationFrame(() => {
+               if (inputRef.current) {
+                   inputRef.current.setSelectionRange(selectionStart, selectionStart);
+               }
+           });
+           return;
+       }
+    }
+    onChange(val);
+  };
+
   const insertSymbol = (char: string) => {
-    // Simple append for now, could enhance to insert at cursor
-    const input = document.getElementById('expr-input') as HTMLInputElement;
-    if (input) {
-      const start = input.selectionStart || value.length;
-      const end = input.selectionEnd || value.length;
-      const newValue = value.substring(0, start) + char + value.substring(end);
+    if (inputRef.current) {
+      const start = inputRef.current.selectionStart || value.length;
+      const end = inputRef.current.selectionEnd || value.length;
+      
+      let textToInsert = char;
+      let newCursorPos = start + char.length;
+
+      // Smart pairing for buttons too
+      if (['(', '[', '{'].includes(char)) {
+          const pair = char === '(' ? ')' : char === '[' ? ']' : '}';
+          textToInsert = char + pair;
+          newCursorPos = start + 1; // Put cursor inside
+      }
+
+      const newValue = value.substring(0, start) + textToInsert + value.substring(end);
       onChange(newValue);
-      // Restore focus and position (rough approx)
+      
       setTimeout(() => {
-        input.focus();
-        input.setSelectionRange(start + char.length, start + char.length);
-      }, 10);
+        inputRef.current?.focus();
+        inputRef.current?.setSelectionRange(newCursorPos, newCursorPos);
+      }, 0);
     } else {
         onChange(value + char);
     }
@@ -64,10 +97,11 @@ const ExpressionInput: React.FC<ExpressionInputProps> = ({ value, onChange, onGe
         <div className="flex items-center p-3">
           <div className="flex-1 relative">
             <input
+              ref={inputRef}
               id="expr-input"
               type="text"
               value={value}
-              onChange={(e) => onChange(e.target.value)}
+              onChange={handleChange}
               onFocus={() => setIsFocused(true)}
               onBlur={() => setIsFocused(false)}
               onKeyDown={handleKeyDown}
@@ -92,7 +126,7 @@ const ExpressionInput: React.FC<ExpressionInputProps> = ({ value, onChange, onGe
             )}
           >
             {value.length > 0 && isValid ? (
-              <Play className="w-5 h-5 fill-current" />
+              <ArrowRight className="w-5 h-5" />
             ) : (
               <Sparkles className="w-5 h-5" />
             )}
