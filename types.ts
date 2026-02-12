@@ -2,8 +2,8 @@ export type Operator = 'AND' | 'OR' | 'NOT' | 'IMPLIES' | 'IFF' | 'XOR';
 
 export interface ASTNode {
   id: string;
-  type: 'VAR' | Operator;
-  value?: string;
+  type: 'VAR' | 'CONST' | Operator;
+  value?: string | boolean; // boolean for CONST
   left?: ASTNode;
   right?: ASTNode;
   operand?: ASTNode; // for NOT
@@ -13,17 +13,17 @@ export interface ASTNode {
 
 export interface TableColumn {
   id: string;
-  label: string; // The display label (affected by settings)
-  expression: string; // Unique identifier for values map
+  label: string;
+  expression: string;
   isInput: boolean;
   isOutput: boolean;
   astId?: string;
-  dependencyIds?: string[]; // IDs of columns this column depends on
+  dependencyIds?: string[];
 }
 
 export interface TruthTableRow {
   id: string;
-  values: Record<string, boolean>; // Map column expression -> boolean value
+  values: Record<string, boolean>;
   index: number;
 }
 
@@ -34,6 +34,28 @@ export interface ImplicationForms {
   converse: string;
   inverse: string;
   contrapositive: string;
+}
+
+// RightAway (RW) Types
+export interface RWResult {
+  active: boolean;
+  value?: boolean | string; // true/false/variable name
+  ruleName?: string;
+  explanation?: string;
+}
+
+// STTT Types
+export interface STTTStep {
+  id: string;
+  description: string;
+  assignment?: string; // e.g. "A = 0"
+  conflict?: boolean;
+}
+
+export interface STTTTrace {
+  steps: STTTStep[];
+  result: 'Proven' | 'Disproven';
+  method: 'Assumption of False' | 'Assumption of True';
 }
 
 // K-Map Types
@@ -62,21 +84,33 @@ export interface KMapData {
   minimizedExpression: string;
 }
 
+export interface ComplexityMetrics {
+  variableCount: number;
+  operatorCount: number;
+  depth: number;
+  rowCount: number;
+  complexityScore: number; // calculated score
+}
+
 export interface AnalysisResult {
   ast: ASTNode;
   columns: TableColumn[];
   rows: TruthTableRow[];
-  variables: string[]; // The variables used in this specific analysis
+  variables: string[];
   classification: Classification;
-  mainConnective: Operator | 'VAR';
+  mainConnective: Operator | 'VAR' | 'CONST';
   implicationForms?: ImplicationForms;
   kMapData?: KMapData;
-  error?: string; // For validation errors (e.g. undeclared variables)
+  rwResult?: RWResult;
+  stttTrace?: STTTTrace;
+  complexity?: ComplexityMetrics;
+  error?: string;
+  processingTime?: number;
 }
 
 export interface AppSettings {
   logic: {
-    negationHandling: 'preserve' | 'normalize' | 'simplify'; // --A vs ¬¬A vs A
+    negationHandling: 'preserve' | 'normalize' | 'simplify';
     truthValues: '0/1' | 'F/T';
     rowOrder: '0→1' | '1→0';
   };
@@ -86,9 +120,13 @@ export interface AppSettings {
     highlightDependencies: boolean;
     dense: boolean;
   };
+  system: {
+    preventRefresh: boolean;
+    geminiApiKey: string;
+    enableAI: boolean;
+  };
 }
 
-// Default Settings Constant
 export const DEFAULT_SETTINGS: AppSettings = {
   logic: {
     negationHandling: 'preserve',
@@ -100,5 +138,24 @@ export const DEFAULT_SETTINGS: AppSettings = {
     showSubExpressions: true,
     highlightDependencies: true,
     dense: false,
+  },
+  system: {
+    preventRefresh: true,
+    geminiApiKey: '',
+    enableAI: false
   }
 };
+
+export interface HistoryItem {
+  id: string;
+  expression: string;
+  timestamp: number;
+  classification?: string;
+}
+
+export interface ProofStep {
+  id: string;
+  content: string;
+  justification: string;
+  isAssumption: boolean;
+}
