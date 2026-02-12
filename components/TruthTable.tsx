@@ -1,21 +1,25 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { clsx } from 'clsx';
-import { TruthTableRow, TableColumn, AppSettings } from '../types';
-import { Copy, Check, GripVertical, MoreHorizontal, Edit2 } from 'lucide-react';
+import { TruthTableRow, TableColumn, AppSettings, Classification } from '../types';
+import { Check, Edit2, Share2, FileSpreadsheet, FileText, Code, FileJson, Copy, ChevronDown } from 'lucide-react';
+import { exportToCSV, exportToExcel, exportToLaTeX, exportToMarkdown, exportToPDF } from '../utils/export';
 
 interface TruthTableProps {
   rows: TruthTableRow[];
   columns: TableColumn[];
   settings: AppSettings;
+  expression: string;
+  classification: Classification;
   onRowSelect?: (row: TruthTableRow) => void;
   onRowChange?: (row: TruthTableRow, changedCol: TableColumn) => void;
 }
 
-const TruthTable: React.FC<TruthTableProps> = ({ rows, columns, settings, onRowSelect, onRowChange }) => {
+const TruthTable: React.FC<TruthTableProps> = ({ rows, columns, settings, expression, classification, onRowSelect, onRowChange }) => {
   const [selectedRowId, setSelectedRowId] = useState<string | null>(null);
   const [copiedRowId, setCopiedRowId] = useState<string | null>(null);
   const [focusedColId, setFocusedColId] = useState<string | null>(null);
+  const [isExportMenuOpen, setIsExportMenuOpen] = useState(false);
   
   // Resizing State
   const [colWidths, setColWidths] = useState<Record<string, number>>({});
@@ -28,7 +32,6 @@ const TruthTable: React.FC<TruthTableProps> = ({ rows, columns, settings, onRowS
     const canvas = document.createElement('canvas');
     const context = canvas.getContext('2d');
     if (!context) return text.length * 10;
-    // Match the font styles from Tailwind config and CSS
     context.font = isHeader 
         ? 'bold 14px "Plus Jakarta Sans", sans-serif' 
         : '14px "JetBrains Mono", monospace';
@@ -39,11 +42,8 @@ const TruthTable: React.FC<TruthTableProps> = ({ rows, columns, settings, onRowS
   useEffect(() => {
     const newWidths: Record<string, number> = {};
     columns.forEach(col => {
-        const headerWidth = measureText(col.label, true) + 40; // padding for icon + space
+        const headerWidth = measureText(col.label, true) + 40; 
         const cellWidth = measureText(settings.logic.truthValues === 'F/T' ? 'F' : '0', false) + 40;
-        
-        // Input cols usually smaller, but let content dictate. Min width 64.
-        // Derived cols usually larger headers.
         newWidths[col.id] = Math.max(headerWidth, cellWidth, col.isInput ? 56 : 80);
     });
     setColWidths(newWidths);
@@ -69,7 +69,6 @@ const TruthTable: React.FC<TruthTableProps> = ({ rows, columns, settings, onRowS
       if (!resizingRef.current) return;
       const { id, startX, startWidth } = resizingRef.current;
       const diff = e.clientX - startX;
-      // Min width 40px
       const newWidth = Math.max(40, startWidth + diff);
       
       setColWidths(prev => ({ ...prev, [id]: newWidth }));
@@ -98,7 +97,6 @@ const TruthTable: React.FC<TruthTableProps> = ({ rows, columns, settings, onRowS
 
   const handleCopyRow = (row: TruthTableRow) => {
     const text = columns.map(c => displayValue(row.values[c.expression])).join('\t');
-    
     navigator.clipboard.writeText(text).catch(() => {});
     if (navigator.vibrate) navigator.vibrate([10, 50]);
     setCopiedRowId(row.id);
@@ -106,7 +104,6 @@ const TruthTable: React.FC<TruthTableProps> = ({ rows, columns, settings, onRowS
   };
 
   const handleRowClick = (row: TruthTableRow) => {
-    // Selection logic for Step-by-step view
     if (selectedRowId === row.id) {
         setSelectedRowId(null);
     } else {
@@ -121,7 +118,7 @@ const TruthTable: React.FC<TruthTableProps> = ({ rows, columns, settings, onRowS
 
   const handleCellClick = (e: React.MouseEvent, row: TruthTableRow, col: TableColumn) => {
     if (onRowChange) {
-        e.stopPropagation(); // Prevent row selection when editing
+        e.stopPropagation();
         const newValue = !row.values[col.expression];
         const newRow = { ...row, values: { ...row.values, [col.expression]: newValue } };
         onRowChange(newRow, col);
@@ -129,22 +126,77 @@ const TruthTable: React.FC<TruthTableProps> = ({ rows, columns, settings, onRowS
     }
   };
 
-  // Dependency Highlighting Logic
   const getOpacity = (col: TableColumn) => {
       if (!focusedColId) return 1;
       if (col.id === focusedColId) return 1;
-      
-      // If the focused column depends on this column, highlight it
       const focusedCol = columns.find(c => c.id === focusedColId);
       if (focusedCol && focusedCol.dependencyIds?.includes(col.astId || '')) return 1;
+      return 0.2; 
+  };
 
-      return 0.2; // Dim unrelated
+  // --- Export Handlers ---
+  const valType = settings.logic.truthValues;
+  const handleExport = (type: 'csv' | 'md' | 'latex' | 'excel' | 'pdf') => {
+      switch(type) {
+          case 'csv': exportToCSV(rows, columns, valType); break;
+          case 'md': exportToMarkdown(rows, columns, valType); break;
+          case 'latex': exportToLaTeX(rows, columns, valType); break;
+          case 'excel': exportToExcel(rows, columns, valType); break;
+          case 'pdf': exportToPDF(rows, columns, expression, classification, valType); break;
+      }
+      setIsExportMenuOpen(false);
   };
 
   return (
-    <div className="w-full h-full flex flex-col bg-surface-50 dark:bg-slate-900 overflow-hidden">
-      <div className="flex-1 overflow-auto no-scrollbar pb-32 w-full">
-        {/* Scroll Container */}
+    <div className="w-full h-full flex flex-col bg-surface-50 dark:bg-slate-900 overflow-hidden relative">
+      
+      {/* Floating Export Button */}
+      <div className="absolute top-2 right-4 z-30">
+        <div className="relative">
+            <button 
+                onClick={() => setIsExportMenuOpen(!isExportMenuOpen)}
+                className="flex items-center gap-2 px-3 py-1.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg shadow-sm hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors text-sm font-medium text-slate-700 dark:text-slate-200"
+            >
+                <Share2 className="w-4 h-4" />
+                <span>Export</span>
+                <ChevronDown className="w-3 h-3 opacity-50" />
+            </button>
+
+            <AnimatePresence>
+                {isExportMenuOpen && (
+                    <motion.div
+                        initial={{ opacity: 0, y: 10, scale: 0.95 }}
+                        animate={{ opacity: 1, y: 0, scale: 1 }}
+                        exit={{ opacity: 0, scale: 0.95 }}
+                        className="absolute right-0 top-full mt-2 w-48 bg-white dark:bg-slate-800 rounded-xl shadow-xl border border-slate-100 dark:border-slate-700 overflow-hidden z-40 p-1"
+                    >
+                         <button onClick={() => handleExport('excel')} className="w-full flex items-center gap-3 px-3 py-2.5 text-sm text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700 rounded-lg">
+                            <FileSpreadsheet className="w-4 h-4 text-green-600" /> Excel (.xlsx)
+                        </button>
+                        <button onClick={() => handleExport('pdf')} className="w-full flex items-center gap-3 px-3 py-2.5 text-sm text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700 rounded-lg">
+                            <FileText className="w-4 h-4 text-red-500" /> PDF Report
+                        </button>
+                        <div className="h-[1px] bg-slate-100 dark:bg-slate-700 my-1" />
+                        <button onClick={() => handleExport('csv')} className="w-full flex items-center gap-3 px-3 py-2.5 text-sm text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700 rounded-lg">
+                            <Copy className="w-4 h-4" /> Copy CSV
+                        </button>
+                        <button onClick={() => handleExport('md')} className="w-full flex items-center gap-3 px-3 py-2.5 text-sm text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700 rounded-lg">
+                            <FileJson className="w-4 h-4" /> Copy Markdown
+                        </button>
+                         <button onClick={() => handleExport('latex')} className="w-full flex items-center gap-3 px-3 py-2.5 text-sm text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700 rounded-lg">
+                            <Code className="w-4 h-4" /> Copy LaTeX
+                        </button>
+                    </motion.div>
+                )}
+            </AnimatePresence>
+            
+            {isExportMenuOpen && (
+                <div className="fixed inset-0 z-20" onClick={() => setIsExportMenuOpen(false)} />
+            )}
+        </div>
+      </div>
+
+      <div className="flex-1 overflow-auto no-scrollbar pb-32 w-full pt-1">
         <div className="min-w-max inline-block align-middle">
            
            {/* Header */}
@@ -171,12 +223,10 @@ const TruthTable: React.FC<TruthTableProps> = ({ rows, columns, settings, onRowS
                                     : "bg-white dark:bg-slate-900"
                         )}
                     >
-                        {/* Grouping Border for Inputs */}
                         {col.isInput && i === columns.filter(c=>c.isInput).length - 1 && (
                             <div className="absolute right-0 top-0 bottom-0 w-[4px] border-r-2 border-double border-slate-300 dark:border-slate-700 z-10" />
                         )}
 
-                        {/* Label */}
                         <div className="flex items-center gap-1">
                             <span className={clsx(
                                 "text-sm font-bold font-display truncate text-center",
@@ -185,11 +235,9 @@ const TruthTable: React.FC<TruthTableProps> = ({ rows, columns, settings, onRowS
                             )}>
                                 {col.label}
                             </span>
-                            {/* All columns are editable now, show icon on hover */}
                             <Edit2 className="w-3 h-3 text-slate-400 opacity-0 group-hover:opacity-100 transition-opacity" />
                         </div>
 
-                        {/* Resize Handle */}
                         <div 
                             onPointerDown={(e) => startResize(e, col.id)}
                             className="absolute right-0 top-0 bottom-0 w-3 cursor-col-resize hover:bg-slate-200/50 dark:hover:bg-slate-700/50 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity z-20"
@@ -215,9 +263,9 @@ const TruthTable: React.FC<TruthTableProps> = ({ rows, columns, settings, onRowS
                     initial={{ opacity: 0, y: 15 }}
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ 
-                        delay: Math.min(i * 0.03, 0.8), // Staggered delay capped at 0.8s
+                        delay: Math.min(i * 0.03, 0.8),
                         duration: 0.4, 
-                        ease: [0.25, 1, 0.5, 1] // Apple-like easing
+                        ease: [0.25, 1, 0.5, 1]
                     }}
                     onClick={() => handleRowClick(row)}
                     onTouchStart={() => handleTouchStart(row)}
@@ -236,7 +284,6 @@ const TruthTable: React.FC<TruthTableProps> = ({ rows, columns, settings, onRowS
                         const width = colWidths[col.id] || (col.isInput ? 64 : 120);
                         const opacity = settings.table.highlightDependencies ? getOpacity(col) : 1;
                         
-                        // All cells are editable
                         const isEditable = true; 
 
                         return (
@@ -253,7 +300,6 @@ const TruthTable: React.FC<TruthTableProps> = ({ rows, columns, settings, onRowS
                                     isEditable ? "cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800 active:scale-95 transition-transform" : ""
                                 )}
                             >
-                                {/* Input Grouping Divider */}
                                 {col.isInput && colIdx === columns.filter(c=>c.isInput).length - 1 && (
                                     <div className="absolute right-0 top-0 bottom-0 w-[4px] border-r-2 border-double border-slate-200 dark:border-slate-800" />
                                 )}
