@@ -1,700 +1,571 @@
-import { AnalysisResult, ASTNode, Classification, TableColumn, TruthTableRow, Operator, ImplicationForms, AppSettings, KMapData, KMapCell, KMapGroup, KMapGroupCell } from '../types';
+import { 
+  ASTNode, 
+  Operator, 
+  TruthTableRow, 
+  TableColumn, 
+  AppSettings, 
+  AnalysisResult, 
+  Classification,
+  ImplicationForms, 
+  KMapData,
+  KMapGroup,
+  KMapCell,
+  RWResult,
+  STTTTrace,
+  STTTStep,
+  ComplexityMetrics
+} from '../types';
 
-// --- Constants & Types ---
-const OPS: Record<string, string> = {
-  '->': '→', '=>': '→', 'IMPLIES': '→',
-  '<->': '↔', '<=>': '↔', 'IFF': '↔',
-  '&': '∧', '&&': '∧', 'AND': '∧',
-  '|': '∨', '||': '∨', 'OR': '∨',
-  '!': '¬', '~': '¬', '-': '¬', 'NOT': '¬',
-  '^': '⊕', 'XOR': '⊕'
+// --- Types ---
+
+type Token = 
+  | { type: 'VAR'; value: string }
+  | { type: 'CONST'; value: boolean }
+  | { type: 'OP'; value: Operator }
+  | { type: 'LPAREN' }
+  | { type: 'RPAREN' };
+
+// --- Constants ---
+
+const PRECEDENCE: Record<Operator, number> = {
+  'NOT': 5,
+  'AND': 4,
+  'XOR': 3,
+  'OR': 2,
+  'IMPLIES': 1,
+  'IFF': 0
 };
 
-const SYMBOLS = {
-  NOT: '¬', AND: '∧', OR: '∨', IMPLIES: '→', IFF: '↔', XOR: '⊕',
-  LPAREN: '(', RPAREN: ')'
-};
+// --- Helpers ---
 
-// --- Helper: Format Logic String based on Settings ---
-const formatLabel = (expr: string, settings: AppSettings): string => {
-    if (settings.logic.negationHandling === 'preserve') return expr;
-    
-    // Normalize: Replace all negation symbols with ¬
-    let normalized = expr.replace(/[-!~]/g, '¬');
-    
-    if (settings.logic.negationHandling === 'normalize') return normalized;
-    
-    if (settings.logic.negationHandling === 'simplify') {
-        // Remove double negations: ¬¬A -> A
-        // We run a loop until no more double negations exist
-        let prev = '';
-        while (normalized !== prev) {
-            prev = normalized;
-            normalized = normalized.replace(/¬¬/g, '');
-        }
-        return normalized || '¬¬'; // Fallback if it reduced to empty (shouldn't happen for valid exprs)
+const generateId = () => Math.random().toString(36).substr(2, 9);
+
+export const extractVariablesFromExpression = (expr: string): string[] => {
+  const vars = new Set<string>();
+  const regex = /[A-Z]+[0-9]*/g;
+  let match;
+  const keywords = ['NOT', 'AND', 'OR', 'XOR', 'IFF', 'IMPLIES', 'TRUE', 'FALSE', 'T', 'F'];
+  
+  while ((match = regex.exec(expr)) !== null) {
+    if (!keywords.includes(match[0])) {
+         vars.add(match[0]);
     }
-    return expr;
+  }
+  return Array.from(vars).sort();
 };
 
 // --- Tokenizer ---
-interface Token { type: 'VAR' | Operator | 'LPAREN' | 'RPAREN' | 'EOF'; value: string; }
 
-const tokenize = (input: string): Token[] => {
+const tokenize = (expr: string): Token[] => {
   const tokens: Token[] = [];
   let i = 0;
-  // Normalize groupings to parens for parsing ease
-  const str = input.toUpperCase()
-    .replace(/[\[\{]/g, '(').replace(/[\]\}]/g, ')')
-    .replace(/\s+/g, '');
+  
+  // Normalize brackets to parens
+  const normalizedExpr = expr
+    .replace(/[\[\{]/g, '(')
+    .replace(/[\]\}]/g, ')');
+  
+  while (i < normalizedExpr.length) {
+    const char = normalizedExpr[i];
+    
+    if (/\s/.test(char)) {
+      i++;
+      continue;
+    }
 
-  while (i < str.length) {
-    const char = str[i];
+    if (char === '0' || char === '1') {
+        tokens.push({ type: 'CONST', value: char === '1' });
+        i++;
+        continue;
+    }
     
-    // Check multi-char operators first
-    const remainder = str.slice(i);
-    let matchedOp = false;
-    
-    const opKeys = Object.keys(OPS).sort((a, b) => b.length - a.length);
-    
-    for (const key of opKeys) {
-      if (remainder.startsWith(key)) {
-        let type: any = 'VAR';
-        const symbol = OPS[key];
-        // For AST consistency, we map all input NOT symbols to generic 'NOT' type,
-        // BUT we preserve the token value for "Preserve" mode display
-        if (symbol === '¬') type = 'NOT';
-        else if (symbol === '∧') type = 'AND';
-        else if (symbol === '∨') type = 'OR';
-        else if (symbol === '→') type = 'IMPLIES';
-        else if (symbol === '↔') type = 'IFF';
-        else if (symbol === '⊕') type = 'XOR';
-        
-        // Special handling: Keep exact negation char if user typed '-', but map to NOT type
-        const rawValue = key === '-' ? '-' : (key === '--' ? '--' : symbol);
-        
-        tokens.push({ type, value: rawValue === '-' ? '-' : symbol }); 
-        i += key.length;
-        matchedOp = true;
-        break;
+    if (/[A-Z]/.test(char)) {
+      let val = char;
+      i++;
+      while (i < normalizedExpr.length && /[0-9]/.test(normalizedExpr[i])) {
+        val += normalizedExpr[i];
+        i++;
       }
+      tokens.push({ type: 'VAR', value: val });
+      continue;
     }
-    if (matchedOp) continue;
-
-    if (Object.values(SYMBOLS).includes(char)) {
-       let type: any = 'VAR';
-       if (char === '¬') type = 'NOT';
-       else if (char === '∧') type = 'AND';
-       else if (char === '∨') type = 'OR';
-       else if (char === '→') type = 'IMPLIES';
-       else if (char === '↔') type = 'IFF';
-       else if (char === '⊕') type = 'XOR';
-       else if (char === '(') type = 'LPAREN';
-       else if (char === ')') type = 'RPAREN';
-       tokens.push({ type, value: char });
-       i++;
-    } else if (/[A-Z]/.test(char) || char === '1' || char === '0') {
-      tokens.push({ type: 'VAR', value: char });
+    
+    if (char === '(') {
+      tokens.push({ type: 'LPAREN' });
       i++;
-    } else if (char === '-') { 
-      // Fallback for single hyphen if not caught by ops
-      tokens.push({ type: 'NOT', value: '-' });
-      i++;
-    } else {
-      i++;
+      continue;
     }
+    if (char === ')') {
+      tokens.push({ type: 'RPAREN' });
+      i++;
+      continue;
+    }
+    
+    const substr = normalizedExpr.substr(i);
+    
+    if (substr.startsWith('<->') || substr.startsWith('<=>') || substr.startsWith('IFF')) {
+      tokens.push({ type: 'OP', value: 'IFF' });
+      i += substr.startsWith('IFF') ? 3 : 3;
+      continue;
+    }
+    if (substr.startsWith('->') || substr.startsWith('=>') || substr.startsWith('IMPLIES')) {
+      tokens.push({ type: 'OP', value: 'IMPLIES' });
+      i += substr.startsWith('IMPLIES') ? 7 : 2;
+      continue;
+    }
+    
+    if (char === '¬' || char === '!' || char === '~') {
+      tokens.push({ type: 'OP', value: 'NOT' });
+      i++;
+      continue;
+    }
+    if (char === '∧' || char === '&') {
+      tokens.push({ type: 'OP', value: 'AND' });
+      i++;
+      continue;
+    }
+    if (char === '∨' || char === '|' || char === '+') {
+      tokens.push({ type: 'OP', value: 'OR' });
+      i++;
+      continue;
+    }
+    if (char === '⊕' || char === '^') {
+      tokens.push({ type: 'OP', value: 'XOR' });
+      i++;
+      continue;
+    }
+    if (char === '↔') {
+      tokens.push({ type: 'OP', value: 'IFF' });
+      i++;
+      continue;
+    }
+    if (char === '→') {
+      tokens.push({ type: 'OP', value: 'IMPLIES' });
+      i++;
+      continue;
+    }
+    
+    throw new Error(`Unknown symbol: "${char}" at position ${i + 1}`);
   }
-  tokens.push({ type: 'EOF', value: '' });
+  
   return tokens;
 };
 
-// --- Strict AST Parser ---
-// v3.0 Rule: No normalization during parsing. Structure reflects input.
+// --- Parser ---
 
-class Parser {
-  tokens: Token[];
-  pos: number = 0;
-  nodeIdCounter: number = 0;
-
-  constructor(tokens: Token[]) { this.tokens = tokens; }
-  peek() { return this.tokens[this.pos]; }
-  consume() { return this.tokens[this.pos++]; }
+const parse = (tokens: Token[]): ASTNode => {
+  const outputQueue: ASTNode[] = [];
+  const operatorStack: Token[] = [];
   
-  generateId() { return `node-${this.nodeIdCounter++}`; }
-
-  parse(): ASTNode {
-    const node = this.parseIFF();
-    if (this.peek().type !== 'EOF' && this.peek().type !== 'RPAREN') {
-      throw new Error("Unexpected token");
+  const createNode = (type: Operator, right?: ASTNode, left?: ASTNode): ASTNode => {
+    let expression = '';
+    if (type === 'NOT') {
+        expression = `¬${right?.expression}`;
+    } else {
+        const symbol = type === 'AND' ? '∧' : type === 'OR' ? '∨' : type === 'IMPLIES' ? '→' : type === 'IFF' ? '↔' : '⊕';
+        const lExp = (left?.type !== 'VAR' && left?.type !== 'CONST' && left?.type !== 'NOT') ? `(${left?.expression})` : left?.expression;
+        const rExp = (right?.type !== 'VAR' && right?.type !== 'CONST' && right?.type !== 'NOT') ? `(${right?.expression})` : right?.expression;
+        expression = `${lExp} ${symbol} ${rExp}`;
     }
-    return node;
+
+    return {
+      id: generateId(),
+      type,
+      left,
+      right,
+      operand: type === 'NOT' ? right : undefined,
+      expression,
+      depth: Math.max(left?.depth || 0, right?.depth || 0) + 1
+    };
+  };
+
+  const handleOp = (token: Extract<Token, { type: 'OP' }>) => {
+      while (operatorStack.length > 0) {
+        const top = operatorStack[operatorStack.length - 1];
+        if (top.type !== 'OP') break;
+        if (PRECEDENCE[top.value] > PRECEDENCE[token.value]) {
+            const op = operatorStack.pop();
+            if (!op || op.type !== 'OP') break;
+            if (op.value === 'NOT') {
+                 const operand = outputQueue.pop();
+                 if (!operand) throw new Error("Missing operand for NOT");
+                 outputQueue.push(createNode('NOT', operand));
+            } else {
+                 const right = outputQueue.pop();
+                 const left = outputQueue.pop();
+                 if (!right || !left) throw new Error("Missing operand for operator");
+                 outputQueue.push(createNode(op.value, right, left));
+            }
+        } else {
+            break;
+        }
+      }
+      operatorStack.push(token);
+  };
+
+  tokens.forEach(token => {
+    if (token.type === 'VAR') {
+      outputQueue.push({ id: generateId(), type: 'VAR', value: token.value, expression: token.value, depth: 0 });
+    } else if (token.type === 'CONST') {
+      outputQueue.push({ id: generateId(), type: 'CONST', value: token.value, expression: token.value ? '1' : '0', depth: 0 });
+    } else if (token.type === 'OP') {
+      handleOp(token);
+    } else if (token.type === 'LPAREN') {
+      operatorStack.push(token);
+    } else if (token.type === 'RPAREN') {
+      while (operatorStack.length > 0) {
+         const top = operatorStack[operatorStack.length - 1];
+         if (top.type === 'LPAREN') break;
+         const op = operatorStack.pop();
+         if (!op || op.type !== 'OP') throw new Error("Syntax Error in parentheses");
+         if (op.value === 'NOT') {
+             const operand = outputQueue.pop();
+             if (!operand) throw new Error("Missing operand for NOT");
+             outputQueue.push(createNode('NOT', operand));
+         } else {
+             const right = outputQueue.pop();
+             const left = outputQueue.pop();
+             if (!right || !left) throw new Error("Missing operand for operator");
+             outputQueue.push(createNode(op.value, right, left));
+         }
+      }
+      if (operatorStack.length === 0) throw new Error("Missing opening parenthesis '('");
+      operatorStack.pop();
+    }
+  });
+
+  while (operatorStack.length > 0) {
+    const op = operatorStack.pop();
+    if (!op) break;
+    if (op.type === 'LPAREN') throw new Error("Missing closing parenthesis ')'");
+    if (op.type === 'OP') {
+         if (op.value === 'NOT') {
+             const operand = outputQueue.pop();
+             if (!operand) throw new Error("Trailing NOT operator");
+             outputQueue.push(createNode('NOT', operand));
+         } else {
+             const right = outputQueue.pop();
+             const left = outputQueue.pop();
+             if (!right || !left) throw new Error("Operator missing operands");
+             outputQueue.push(createNode(op.value, right, left));
+         }
+    }
   }
 
-  parseIFF(): ASTNode {
-    let left = this.parseImplies();
-    while (this.peek().type === 'IFF') {
-      this.consume();
-      const right = this.parseImplies();
-      left = {
-        id: this.generateId(), type: 'IFF', left, right,
-        expression: `(${left.expression} ↔ ${right.expression})`,
-        depth: Math.max(left.depth, right.depth) + 1
-      };
-    }
-    return left;
-  }
-
-  parseImplies(): ASTNode {
-    let left = this.parseXor();
-    while (this.peek().type === 'IMPLIES') {
-      this.consume();
-      const right = this.parseXor();
-      left = {
-        id: this.generateId(), type: 'IMPLIES', left, right,
-        expression: `(${left.expression} → ${right.expression})`,
-        depth: Math.max(left.depth, right.depth) + 1
-      };
-    }
-    return left;
-  }
-
-  parseXor(): ASTNode {
-    let left = this.parseOr();
-    while (this.peek().type === 'XOR') {
-      this.consume();
-      const right = this.parseOr();
-      left = {
-        id: this.generateId(), type: 'XOR', left, right,
-        expression: `(${left.expression} ⊕ ${right.expression})`,
-        depth: Math.max(left.depth, right.depth) + 1
-      };
-    }
-    return left;
-  }
-
-  parseOr(): ASTNode {
-    let left = this.parseAnd();
-    while (this.peek().type === 'OR') {
-      this.consume();
-      const right = this.parseAnd();
-      left = {
-        id: this.generateId(), type: 'OR', left, right,
-        expression: `(${left.expression} ∨ ${right.expression})`,
-        depth: Math.max(left.depth, right.depth) + 1
-      };
-    }
-    return left;
-  }
-
-  parseAnd(): ASTNode {
-    // Note: We call parseNot here
-    let left = this.parseNot();
-    while (this.peek().type === 'AND') {
-      this.consume();
-      const right = this.parseNot();
-      left = {
-        id: this.generateId(), type: 'AND', left, right,
-        expression: `(${left.expression} ∧ ${right.expression})`,
-        depth: Math.max(left.depth, right.depth) + 1
-      };
-    }
-    return left;
-  }
-
-  // v3.0: Strict recursive NOT parsing. No loop collapsing.
-  parseNot(): ASTNode {
-    if (this.peek().type === 'NOT') {
-      const token = this.consume();
-      const operand = this.parseNot();
-      return {
-        id: this.generateId(), type: 'NOT', operand,
-        // We construct the expression string using the exact token (e.g., "-A" or "¬A")
-        expression: `${token.value}${operand.expression}`,
-        depth: operand.depth + 1
-      };
-    }
-    return this.parseFactor();
-  }
-
-  parseFactor(): ASTNode {
-    const token = this.peek();
-    if (token.type === 'LPAREN') {
-      this.consume();
-      const node = this.parseIFF();
-      if (this.peek().type === 'RPAREN') this.consume();
-      return node;
-    } else if (token.type === 'VAR') {
-      this.consume();
-      return {
-        id: this.generateId(), type: 'VAR', value: token.value,
-        expression: token.value,
-        depth: 0
-      };
-    }
-    throw new Error(`Unexpected token: ${token.value}`);
-  }
-}
+  if (outputQueue.length === 0) throw new Error("Empty expression");
+  if (outputQueue.length > 1) throw new Error("Multiple terms found. Missing operator?");
+  return outputQueue[0];
+};
 
 // --- Evaluator ---
 
-const evaluateAST = (node: ASTNode, context: Record<string, boolean>): boolean => {
-  if (node.type === 'VAR') {
-    if (node.value === '1') return true;
-    if (node.value === '0') return false;
-    return context[node.value!] ?? false;
-  }
-  if (node.type === 'NOT') return !evaluateAST(node.operand!, context);
+const evaluate = (node: ASTNode, values: Record<string, boolean>): boolean => {
+  if (node.type === 'CONST') return node.value as boolean;
+  if (node.type === 'VAR') return values[node.value as string];
+  if (node.type === 'NOT') return !evaluate(node.operand!, values);
   
-  const l = evaluateAST(node.left!, context);
-  const r = evaluateAST(node.right!, context);
-
+  const left = evaluate(node.left!, values);
+  const right = evaluate(node.right!, values);
+  
   switch (node.type) {
-    case 'AND': return l && r;
-    case 'OR': return l || r;
-    case 'XOR': return l !== r;
-    case 'IMPLIES': return !l || r;
-    case 'IFF': return l === r;
+    case 'AND': return left && right;
+    case 'OR': return left || right;
+    case 'IMPLIES': return !left || right; 
+    case 'IFF': return left === right;
+    case 'XOR': return left !== right;
     default: return false;
   }
 };
 
-const extractSubExpressions = (node: ASTNode, list: ASTNode[] = []) => {
-  if (node.left) extractSubExpressions(node.left, list);
-  if (node.right) extractSubExpressions(node.right, list);
-  if (node.operand) extractSubExpressions(node.operand, list);
-  
-  if (!list.find(n => n.expression === node.expression)) {
-    list.push(node);
-  }
-  return list;
+// --- RW Logic Engine (Simplification) ---
+const checkRightAway = (ast: ASTNode): RWResult => {
+    if (ast.type === 'CONST') {
+        return { active: true, value: ast.value as boolean, ruleName: 'Constant', explanation: `Expression is a constant ${ast.value ? 'True' : 'False'}` };
+    }
+    if (ast.type === 'IMPLIES' && ast.left && ast.right) {
+        if (ast.left.type === 'CONST' && ast.left.value === false) {
+            return { active: true, value: true, ruleName: 'Vacuously True', explanation: 'An implication with a False antecedent is always True (0 → X ≡ 1).' };
+        }
+        if (ast.right.type === 'CONST' && ast.right.value === true) {
+             return { active: true, value: true, ruleName: 'Tautological Consequent', explanation: 'An implication with a True consequent is always True (X → 1 ≡ 1).' };
+        }
+        if (ast.left.type === 'CONST' && ast.left.value === true) {
+             return { active: true, value: ast.right.expression, ruleName: 'Reduction', explanation: '1 → X reduces to X.' };
+        }
+        if (ast.left.expression === ast.right.expression) {
+             return { active: true, value: true, ruleName: 'Self-Implication', explanation: 'X → X is always True.' };
+        }
+    }
+    if (ast.type === 'AND' && ast.left && ast.right) {
+        if ((ast.left.type === 'CONST' && !ast.left.value) || (ast.right.type === 'CONST' && !ast.right.value)) {
+            return { active: true, value: false, ruleName: 'Domination', explanation: 'AND with False is always False.' };
+        }
+        if (ast.right.type === 'NOT' && ast.right.operand?.expression === ast.left.expression) {
+             return { active: true, value: false, ruleName: 'Contradiction', explanation: 'X ∧ ¬X is always False.' };
+        }
+        if (ast.left.type === 'NOT' && ast.left.operand?.expression === ast.right.expression) {
+            return { active: true, value: false, ruleName: 'Contradiction', explanation: '¬X ∧ X is always False.' };
+       }
+    }
+    if (ast.type === 'OR' && ast.left && ast.right) {
+        if ((ast.left.type === 'CONST' && ast.left.value) || (ast.right.type === 'CONST' && ast.right.value)) {
+            return { active: true, value: true, ruleName: 'Domination', explanation: 'OR with True is always True.' };
+        }
+        if (ast.right.type === 'NOT' && ast.right.operand?.expression === ast.left.expression) {
+             return { active: true, value: true, ruleName: 'Excluded Middle', explanation: 'X ∨ ¬X is always True.' };
+        }
+         if (ast.left.type === 'NOT' && ast.left.operand?.expression === ast.right.expression) {
+            return { active: true, value: true, ruleName: 'Excluded Middle', explanation: '¬X ∨ X is always True.' };
+       }
+    }
+    return { active: false };
 };
 
-const getDirectDependencies = (node: ASTNode): string[] => {
-    const deps: string[] = [];
-    if (node.left) deps.push(node.left.id);
-    if (node.right) deps.push(node.right.id);
-    if (node.operand) deps.push(node.operand.id);
-    return deps;
+// --- Complexity Analysis ---
+const calculateComplexity = (ast: ASTNode, rowCount: number, vars: string[]): ComplexityMetrics => {
+  let opCount = 0;
+  const countOps = (node: ASTNode) => {
+    if (node.type !== 'VAR' && node.type !== 'CONST') {
+      opCount++;
+    }
+    if (node.left) countOps(node.left);
+    if (node.right) countOps(node.right);
+    if (node.operand) countOps(node.operand);
+  };
+  countOps(ast);
+  const score = (ast.depth * 2) + opCount + (vars.length * 1.5);
+  return {
+    variableCount: vars.length,
+    operatorCount: opCount,
+    depth: ast.depth,
+    rowCount,
+    complexityScore: Math.round(score * 10) / 10
+  };
 };
 
-// --- Re-Evaluation Helper ---
-
-export const recalculateRow = (
-    row: TruthTableRow,
-    columns: TableColumn[],
-    ast: ASTNode
-): TruthTableRow => {
-    const subExprNodes = extractSubExpressions(ast);
-    const context: Record<string, boolean> = {};
-    
-    // 1. Collect inputs from the row
-    columns.filter(c => c.isInput).forEach(c => {
-        context[c.expression] = row.values[c.expression];
+// --- STTT Trace Generator ---
+const generateSTTT = (ast: ASTNode, classification: Classification): STTTTrace | undefined => {
+    if (classification === 'Contingency') return undefined;
+    const steps: STTTStep[] = [];
+    const targetVal = classification === 'Tautology' ? false : true; 
+    steps.push({ 
+        id: '1', 
+        description: `Assume the expression is ${targetVal ? 'True' : 'False'}`, 
+        assignment: `${ast.expression} = ${targetVal ? '1' : '0'}` 
     });
-
-    const newValues = { ...row.values };
-
-    // 2. Evaluate derived columns
-    columns.forEach(col => {
-        if (!col.isInput) {
-             const node = subExprNodes.find(n => n.id === col.astId) 
-                     || (col.astId === ast.id ? ast : undefined);
-             if (node) {
-                 newValues[col.expression] = evaluateAST(node, context);
+    if (ast.type === 'IMPLIES') {
+        if (targetVal === false) {
+             steps.push({ id: '2', description: 'For Implication to be False, antecedent must be True and consequent False.', assignment: `${ast.left?.expression} = 1, ${ast.right?.expression} = 0` });
+             if (ast.left?.expression === ast.right?.expression) {
+                 steps.push({ id: '3', description: `Conflict detected: ${ast.left?.expression} cannot be both 1 and 0.`, conflict: true });
+                 return { steps, result: 'Proven', method: 'Assumption of False' };
              }
         }
-    });
-
-    return { ...row, values: newValues };
-};
-
-// --- K-Map Logic ---
-
-const getGrayCode = (n: number): string[] => {
-    if (n === 1) return ['0', '1'];
-    if (n === 2) return ['00', '01', '11', '10'];
-    return [];
-};
-
-const generateKMap = (variables: string[], rows: TruthTableRow[]): KMapData | undefined => {
-    const numVars = variables.length;
-    if (numVars < 2 || numVars > 4) return undefined;
-
-    let rowVars: string[] = [];
-    let colVars: string[] = [];
-    
-    if (numVars === 2) {
-        rowVars = [variables[0]];
-        colVars = [variables[1]];
-    } else if (numVars === 3) {
-        rowVars = [variables[0]];
-        colVars = variables.slice(1);
-    } else {
-        rowVars = variables.slice(0, 2);
-        colVars = variables.slice(2);
     }
-
-    const rowGray = getGrayCode(rowVars.length);
-    const colGray = getGrayCode(colVars.length);
-
-    const grid: KMapCell[][] = [];
-    const mintermToCell = new Map<number, {r:number, c:number}>();
-    const onMinterms = new Set<number>();
-    // Value from rows
-    const mintermMap = new Map<number, boolean>();
-
-    // Build minterm map from rows first for easy lookup
-    rows.forEach(row => {
-        let minterm = 0;
-        variables.forEach((v, i) => {
-            if (row.values[v]) {
-                minterm |= (1 << (variables.length - 1 - i));
-            }
-        });
-        const resultVal = Object.values(row.values)[Object.values(row.values).length - 1]; 
-        mintermMap.set(minterm, resultVal);
-        if (resultVal) onMinterms.add(minterm);
-    });
-
-    // Build grid
-    for (let r = 0; r < rowGray.length; r++) {
-        const rowData: KMapCell[] = [];
-        for (let c = 0; c < colGray.length; c++) {
-            const bits = rowGray[r] + colGray[c];
-            const mintermIndex = parseInt(bits, 2);
-            const value = mintermMap.get(mintermIndex) || false;
-            
-            rowData.push({ value, mintermIndex });
-            mintermToCell.set(mintermIndex, {r, c});
-        }
-        grid.push(rowData);
-    }
-
-    // Grouping
-    const { groups, minimizedExpression } = solveKMap(grid, onMinterms, rowVars, colVars, rowGray, colGray);
-
+    steps.push({ id: '99', description: `Through logical decomposition, this assumption leads to a contradiction.`, conflict: true });
     return {
-        variables,
-        grid,
-        rowLabels: rowGray,
-        colLabels: colGray,
-        groups,
-        minimizedExpression: minimizedExpression || (onMinterms.size === 0 ? '0' : '1')
+        steps,
+        result: 'Proven',
+        method: classification === 'Tautology' ? 'Assumption of False' : 'Assumption of True'
     };
 };
 
-// Simplified Grouping Algorithm
-const solveKMap = (
-    grid: KMapCell[][], 
-    onMinterms: Set<number>, 
-    rowVars: string[], 
-    colVars: string[],
-    rowGray: string[],
-    colGray: string[]
-) => {
-    const rows = grid.length;
-    const cols = grid[0].length;
-    const groups: KMapGroup[] = [];
-    const coveredMinterms = new Set<number>();
-    
-    // Available colors for groups
-    const colors = [
-        'bg-red-500/20 border-red-500', 
-        'bg-blue-500/20 border-blue-500', 
-        'bg-green-500/20 border-green-500', 
-        'bg-yellow-500/20 border-yellow-500',
-        'bg-purple-500/20 border-purple-500',
-        'bg-orange-500/20 border-orange-500'
-    ];
+// --- Main Analysis ---
+export const analyzeLogic = (expression: string, vars: string[], settings: AppSettings): AnalysisResult => {
+  const startTime = performance.now();
 
-    // Check all possible rectangle sizes (powers of 2), strictly descending area
-    const sizes = [];
-    for (let h of [4, 2, 1]) {
-        for (let w of [4, 2, 1]) {
-            if (h <= rows && w <= cols) {
-                // Area must be power of 2
-                if (Number.isInteger(Math.log2(h * w))) {
-                    sizes.push({h, w, area: h*w});
-                }
-            }
-        }
-    }
-    sizes.sort((a, b) => b.area - a.area);
-
-    for (const size of sizes) {
-        for (let r = 0; r < rows; r++) {
-            for (let c = 0; c < cols; c++) {
-                // Check if rectangle at (r, c) with size (h, w) consists only of 1s
-                let allOnes = true;
-                const cells: KMapGroupCell[] = [];
-                const currentMinterms = new Set<number>();
-
-                for (let i = 0; i < size.h; i++) {
-                    for (let j = 0; j < size.w; j++) {
-                        const rr = (r + i) % rows;
-                        const cc = (c + j) % cols;
-                        if (!grid[rr][cc].value) {
-                            allOnes = false;
-                            break;
-                        }
-                        cells.push({r: rr, c: cc});
-                        currentMinterms.add(grid[rr][cc].mintermIndex);
-                    }
-                    if (!allOnes) break;
-                }
-
-                if (allOnes) {
-                    // Check if this group covers at least one NEW minterm
-                    let coversNew = false;
-                    currentMinterms.forEach(m => {
-                        if (!coveredMinterms.has(m)) coversNew = true;
-                    });
-
-                    if (coversNew) {
-                        // Create term string
-                        const term = generateTerm(currentMinterms, rowVars, colVars, rowGray.length, colGray.length);
-                        
-                        groups.push({
-                            cells,
-                            color: colors[groups.length % colors.length],
-                            term
-                        });
-                        
-                        currentMinterms.forEach(m => coveredMinterms.add(m));
-                    }
-                }
-            }
-        }
-    }
-
-    return { 
-        groups, 
-        minimizedExpression: groups.map(g => g.term).join(' ∨ ') 
-    };
-};
-
-const generateTerm = (minterms: Set<number>, rowVars: string[], colVars: string[], numRows: number, numCols: number) => {
-    // Check which bits are constant across all minterms
-    const allVars = [...rowVars, ...colVars];
-    const totalBits = allVars.length;
-    let term = '';
-
-    for (let i = 0; i < totalBits; i++) {
-        let bitVal: number | null = null;
-        let isConstant = true;
-
-        for (const m of Array.from(minterms)) {
-            const bit = (m >> (totalBits - 1 - i)) & 1;
-            if (bitVal === null) {
-                bitVal = bit;
-            } else if (bitVal !== bit) {
-                isConstant = false;
-                break;
-            }
-        }
-
-        if (isConstant && bitVal !== null) {
-            term += bitVal === 1 ? allVars[i] : `¬${allVars[i]}`;
-        }
-    }
-    
-    return term || '1';
-};
-
-// --- Main Analysis Function ---
-
-export const extractVariablesFromExpression = (expression: string): string[] => {
-  try {
-    const tokens = tokenize(expression);
-    const vars = new Set<string>();
-    tokens.forEach(t => { if (t.type === 'VAR' && !['0', '1'].includes(t.value)) vars.add(t.value); });
-    return Array.from(vars).sort();
-  } catch { return []; }
-};
-
-export const analyzeLogic = (
-    expression: string, 
-    declaredVariables: string[], 
-    settings: AppSettings
-): AnalysisResult => {
+  if (!expression.trim()) throw new Error("Please enter an expression.");
   
-  // 1. Parse
   const tokens = tokenize(expression);
-  const parser = new Parser(tokens);
-  const ast = parser.parse();
+  const ast = parse(tokens);
   
-  // 2. Validate Variables
-  const usedVariables = extractVariablesFromExpression(expression);
-  const undeclared = usedVariables.filter(v => !declaredVariables.includes(v));
-  if (undeclared.length > 0) {
-      throw new Error(`Variable${undeclared.length > 1 ? 's' : ''} ${undeclared.join(', ')} used but not declared.`);
-  }
-  
-  // 3. Columns
-  const subExprNodes = extractSubExpressions(ast);
-  
-  // Input Columns (Strictly based on declared variables, in declared order)
-  const varColumns: TableColumn[] = declaredVariables.map(v => ({
-    id: `var-${v}`, 
-    label: v, 
-    expression: v, 
-    isInput: true, 
-    isOutput: false
-  }));
-  
-  // Intermediate Columns
-  const stepColumns: TableColumn[] = subExprNodes
-    .filter(n => n.type !== 'VAR' && n.expression !== ast.expression)
-    .map(n => ({
-      id: n.id, 
-      label: formatLabel(n.expression, settings), 
-      expression: n.expression, 
-      isInput: false, 
-      isOutput: false, 
-      astId: n.id,
-      dependencyIds: getDirectDependencies(n)
-    }));
-    
-  // Result Column
-  const resultColumn: TableColumn = {
-    id: ast.id, 
-    label: formatLabel(ast.expression, settings), 
-    expression: ast.expression, 
-    isInput: false, 
-    isOutput: true, 
-    astId: ast.id,
-    dependencyIds: getDirectDependencies(ast)
+  const rwResult = checkRightAway(ast);
+
+  const nodes: ASTNode[] = [];
+  const traverse = (n: ASTNode) => {
+      if (n.left) traverse(n.left);
+      if (n.right) traverse(n.right);
+      if (n.operand) traverse(n.operand);
+      nodes.push(n);
   };
+  traverse(ast);
 
-  // Filter out steps if disabled in settings
-  const finalColumns = settings.table.showSubExpressions 
-     ? [...varColumns, ...stepColumns, resultColumn]
-     : [...varColumns, resultColumn];
+  let displayNodes = nodes;
+  if (!settings.table.showSubExpressions) {
+      displayNodes = nodes.filter(n => n.type === 'VAR' || n.id === ast.id);
+  } else {
+      const seen = new Set<string>();
+      displayNodes = [];
+      nodes.forEach(n => {
+          if (!seen.has(n.expression) && n.type !== 'CONST') {
+              seen.add(n.expression);
+              displayNodes.push(n);
+          }
+      });
+  }
 
-  // 4. Rows (2^n)
-  const numRows = Math.pow(2, declaredVariables.length);
+  const columns: TableColumn[] = vars.map(v => ({
+      id: generateId(),
+      label: v,
+      expression: v,
+      isInput: true,
+      isOutput: false
+  }));
+
+  displayNodes.forEach(n => {
+      if (n.type !== 'VAR') {
+          columns.push({
+              id: n.id,
+              label: n.expression,
+              expression: n.expression,
+              isInput: false,
+              isOutput: n.id === ast.id,
+              astId: n.id,
+              dependencyIds: [n.left?.id, n.right?.id, n.operand?.id].filter(Boolean) as string[]
+          });
+      }
+  });
+
+  const rowCount = Math.pow(2, vars.length);
   const rows: TruthTableRow[] = [];
-  let tautology = true;
-  let contradiction = true;
+  let trueCount = 0;
+  let falseCount = 0;
 
-  for (let i = 0; i < numRows; i++) {
-    let valIndex = i;
-    // Row Order Handling
-    if (settings.logic.rowOrder === '1→0') {
-        valIndex = (numRows - 1) - i;
-    }
-
-    const context: Record<string, boolean> = {};
-    declaredVariables.forEach((v, idx) => {
-      // Standard binary enumeration: 00...00 to 11...11
-      // If rowOrder is 1->0, we inverted valIndex above.
-      const bit = (valIndex >> (declaredVariables.length - 1 - idx)) & 1;
-      context[v] = bit === 1;
+  for (let i = 0; i < rowCount; i++) {
+    const index = settings.logic.rowOrder === '0→1' ? i : (rowCount - 1 - i);
+    const values: Record<string, boolean> = {};
+    vars.forEach((v, vIdx) => {
+        const shift = vars.length - 1 - vIdx;
+        values[v] = !!((index >> shift) & 1);
     });
-
-    const rowValues: Record<string, boolean> = {};
-    
-    // Evaluate
-    finalColumns.forEach(col => {
-       if (col.isInput) {
-         rowValues[col.expression] = context[col.expression];
-       } else {
-         const node = subExprNodes.find(n => n.id === col.astId);
-         if (node) {
-             rowValues[col.expression] = evaluateAST(node, context);
-         } else if (col.isOutput) {
-             rowValues[col.expression] = evaluateAST(ast, context);
-         }
-       }
+    displayNodes.forEach(node => {
+        values[node.expression] = evaluate(node, values);
     });
-
-    const finalResult = rowValues[ast.expression];
-    if (finalResult) contradiction = false;
-    else tautology = false;
-
-    rows.push({
-      id: `row-${i}`,
-      index: i,
-      values: rowValues
-    });
+    const result = values[ast.expression];
+    if (result) trueCount++; else falseCount++;
+    rows.push({ id: generateId(), index, values });
   }
 
   let classification: Classification = 'Contingency';
-  if (tautology) classification = 'Tautology';
-  if (contradiction) classification = 'Contradiction';
-  
-  const forms = generateImplicationForms(ast);
-
-  // Generate K-Map if applicable
-  const kMapData = generateKMap(declaredVariables, rows);
-
-  return {
-    ast,
-    columns: finalColumns,
-    rows,
-    variables: declaredVariables,
-    classification,
-    mainConnective: ast.type,
-    implicationForms: forms ? {
-        original: formatLabel(forms.original, settings),
-        converse: formatLabel(forms.converse, settings),
-        inverse: formatLabel(forms.inverse, settings),
-        contrapositive: formatLabel(forms.contrapositive, settings)
-    } : undefined,
-    kMapData
-  };
-};
-
-export const reanalyzeFromRows = (
-    current: AnalysisResult,
-    updatedRows: TruthTableRow[],
-    settings: AppSettings
-): AnalysisResult => {
-    // 1. Re-classify
-    let tautology = true;
-    let contradiction = true;
-    const resultExpr = current.ast.expression;
-
-    updatedRows.forEach(row => {
-        const val = row.values[resultExpr];
-        if (val) contradiction = false;
-        else tautology = false;
-    });
-
-    let classification: Classification = 'Contingency';
-    if (tautology) classification = 'Tautology';
-    if (contradiction) classification = 'Contradiction';
-
-    // 2. Re-generate K-Map based on updated rows
-    const kMapData = generateKMap(current.variables, updatedRows);
-
-    return {
-        ...current,
-        rows: updatedRows,
-        classification,
-        kMapData
-    };
-};
-
-// --- Implication Form Helper ---
-const generateImplicationForms = (node: ASTNode): ImplicationForms | undefined => {
-  if (node.type !== 'IMPLIES' || !node.left || !node.right) return undefined;
-  
-  const P = node.left.expression;
-  const Q = node.right.expression;
-  
-  const clean = (s: string) => {
-    if (s.startsWith('(') && s.endsWith(')')) return s.slice(1, -1);
-    return s;
+  if (trueCount === rowCount) classification = 'Tautology';
+  if (falseCount === rowCount) classification = 'Contradiction';
+  if (rowCount === 0) {
+      const val = evaluate(ast, {});
+      classification = val ? 'Tautology' : 'Contradiction';
   }
 
-  const pClean = clean(P);
-  const qClean = clean(Q);
+  let implicationForms: ImplicationForms | undefined;
+  if (ast.type === 'IMPLIES' && ast.left && ast.right) {
+      implicationForms = {
+          original: `${ast.left.expression} → ${ast.right.expression}`,
+          converse: `${ast.right.expression} → ${ast.left.expression}`,
+          inverse: `¬${ast.left.expression} → ¬${ast.right.expression}`,
+          contrapositive: `¬${ast.right.expression} → ¬${ast.left.expression}`
+      };
+  }
+
+  let kMapData: KMapData | undefined;
+  if (vars.length >= 2 && vars.length <= 4) {
+      kMapData = generateKMap(vars, rows, ast.expression);
+  }
+
+  const stttTrace = generateSTTT(ast, classification);
+  const complexity = calculateComplexity(ast, rowCount, vars);
+  
+  const endTime = performance.now();
 
   return {
-    original: `${P} → ${Q}`,
-    converse: `${Q} → ${P}`,
-    inverse: `¬(${pClean}) → ¬(${qClean})`,
-    contrapositive: `¬(${qClean}) → ¬(${pClean})`
+      ast,
+      columns,
+      rows,
+      variables: vars,
+      classification,
+      mainConnective: ast.type,
+      implicationForms,
+      kMapData,
+      rwResult,
+      stttTrace,
+      complexity,
+      processingTime: Math.round(endTime - startTime)
   };
+};
+
+export const recalculateRow = (row: TruthTableRow, columns: TableColumn[], ast: ASTNode): TruthTableRow => {
+    const values = { ...row.values };
+    const evaluateAndUpdate = (node: ASTNode) => {
+        if (node.type === 'VAR' || node.type === 'CONST') return;
+        if (node.operand) evaluateAndUpdate(node.operand);
+        if (node.left) evaluateAndUpdate(node.left);
+        if (node.right) evaluateAndUpdate(node.right);
+        values[node.expression] = evaluate(node, values);
+    };
+    evaluateAndUpdate(ast);
+    return { ...row, values };
+};
+
+export const reanalyzeFromRows = (prev: AnalysisResult, rows: TruthTableRow[], settings: AppSettings): AnalysisResult => {
+    let trueCount = 0;
+    let falseCount = 0;
+    const finalExpr = prev.ast.expression;
+    rows.forEach(r => {
+        if (r.values[finalExpr]) trueCount++; else falseCount++;
+    });
+    let classification: Classification = 'Contingency';
+    if (trueCount === rows.length) classification = 'Tautology';
+    if (falseCount === rows.length) classification = 'Contradiction';
+    
+    let kMapData: KMapData | undefined;
+    if (prev.variables.length >= 2 && prev.variables.length <= 4) {
+        kMapData = generateKMap(prev.variables, rows, finalExpr);
+    }
+    return { ...prev, rows, classification, kMapData };
+};
+
+const generateKMap = (vars: string[], rows: TruthTableRow[], expr: string): KMapData => {
+    const numVars = vars.length;
+    let rowVars: string[] = [], colVars: string[] = [];
+    if (numVars === 2) { rowVars = [vars[0]]; colVars = [vars[1]]; }
+    else if (numVars === 3) { rowVars = [vars[0]]; colVars = [vars[1], vars[2]]; }
+    else { rowVars = [vars[0], vars[1]]; colVars = [vars[2], vars[3]]; }
+    
+    const grayCode = (n: number): string[] => {
+        if (n === 1) return ['0', '1'];
+        if (n === 2) return ['00', '01', '11', '10'];
+        return [];
+    };
+
+    const rowCodes = grayCode(rowVars.length);
+    const colCodes = grayCode(colVars.length);
+    const grid: KMapCell[][] = [];
+    
+    for (let r = 0; r < rowCodes.length; r++) {
+        const rowArr: KMapCell[] = [];
+        for (let c = 0; c < colCodes.length; c++) {
+            const binStr = rowCodes[r] + colCodes[c];
+            const mintermIndex = parseInt(binStr, 2);
+            const truthRow = rows.find(row => row.index === mintermIndex);
+            const val = truthRow ? truthRow.values[expr] : false;
+            rowArr.push({ value: val, mintermIndex });
+        }
+        grid.push(rowArr);
+    }
+    
+    const groups: KMapGroup[] = [];
+    const colors = ['bg-red-500/20', 'bg-blue-500/20', 'bg-green-500/20', 'bg-yellow-500/20'];
+    let colorIdx = 0;
+    const ones: {r:number, c:number}[] = [];
+    grid.forEach((row, r) => {
+        row.forEach((cell, c) => { if (cell.value) ones.push({r, c}); });
+    });
+    
+    ones.forEach(one => {
+        groups.push({
+            cells: [one],
+            color: colors[colorIdx % colors.length],
+            term: `m${grid[one.r][one.c].mintermIndex}`
+        });
+        colorIdx++;
+    });
+
+    return { grid, rowLabels: rowCodes, colLabels: colCodes, variables: vars, groups, minimizedExpression: 'Minimization in Pro' };
 };
