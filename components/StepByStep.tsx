@@ -46,10 +46,6 @@ const StepByStep: React.FC<StepByStepProps> = ({ ast, row, onClose }) => {
 
     const evaluateNode = (node: ASTNode): boolean => {
        // Helper to just get value from row for display
-       // We assume row.values contains all sub-expressions keys or we recurse?
-       // logic.ts calculates all sub-expressions. 
-       // However, `row.values` keys are expressions strings.
-       // It's safer to use the expression string to look up the pre-calculated value.
        return row.values[node.expression]; 
     };
 
