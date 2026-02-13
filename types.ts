@@ -1,29 +1,30 @@
+
 export type Operator = 'AND' | 'OR' | 'NOT' | 'IMPLIES' | 'IFF' | 'XOR';
 
 export interface ASTNode {
   id: string;
-  type: 'VAR' | 'CONST' | Operator;
-  value?: string | boolean; // boolean for CONST
+  type: 'VAR' | Operator;
+  value?: string;
   left?: ASTNode;
   right?: ASTNode;
-  operand?: ASTNode; // for NOT
-  expression: string; // The structural representation (e.g., "¬¬A")
+  operand?: ASTNode; 
+  expression: string; 
   depth: number;
 }
 
 export interface TableColumn {
   id: string;
-  label: string;
+  label: string; 
   expression: string;
   isInput: boolean;
   isOutput: boolean;
   astId?: string;
-  dependencyIds?: string[];
+  dependencyIds?: string[]; 
 }
 
 export interface TruthTableRow {
   id: string;
-  values: Record<string, boolean>;
+  values: Record<string, boolean>; 
   index: number;
 }
 
@@ -36,29 +37,6 @@ export interface ImplicationForms {
   contrapositive: string;
 }
 
-// RightAway (RW) Types
-export interface RWResult {
-  active: boolean;
-  value?: boolean | string; // true/false/variable name
-  ruleName?: string;
-  explanation?: string;
-}
-
-// STTT Types
-export interface STTTStep {
-  id: string;
-  description: string;
-  assignment?: string; // e.g. "A = 0"
-  conflict?: boolean;
-}
-
-export interface STTTTrace {
-  steps: STTTStep[];
-  result: 'Proven' | 'Disproven';
-  method: 'Assumption of False' | 'Assumption of True';
-}
-
-// K-Map Types
 export interface KMapCell {
   value: boolean;
   mintermIndex: number;
@@ -84,33 +62,84 @@ export interface KMapData {
   minimizedExpression: string;
 }
 
+// STTT Types
+export type STTTProofType = 'Tautology' | 'Contradiction' | 'Contingency' | 'Implication' | 'Equivalence';
+
+export type AssignmentMap = Record<string, boolean>;
+
+export interface STTTStep {
+    id: string;
+    description: string;
+    targetNodeExpression: string;
+    value: boolean;
+    reason: string;
+}
+
+export interface STTTContradiction {
+    variable: string;
+    val1: boolean;
+    val2: boolean;
+}
+
+export interface STTTBranch {
+    id: string;
+    parentId?: string;
+    steps: STTTStep[];
+    assignments: AssignmentMap;
+    status: 'Open' | 'Closed' | 'Complete';
+    children?: STTTBranch[];
+    contradiction?: STTTContradiction;
+}
+
+export interface STTTReport {
+    target: STTTProofType;
+    rootBranch: STTTBranch;
+    result: 'Proven' | 'Disproven';
+    counterExample?: AssignmentMap;
+    textSummary: string;
+    proofTitle: string;
+    initialAssumptions: { expr: string, val: boolean }[];
+}
+
+export interface RightAwayResult {
+  isApplicable: boolean;
+  variable?: string;
+  resultValue?: boolean;
+  explanation?: string;
+}
+
 export interface ComplexityMetrics {
-  variableCount: number;
-  operatorCount: number;
+  operators: number;
   depth: number;
-  rowCount: number;
-  complexityScore: number; // calculated score
+  totalRows: number;
+}
+
+export interface SimplificationStep {
+  expression: string;
+  rule: string;
 }
 
 export interface AnalysisResult {
   ast: ASTNode;
   columns: TableColumn[];
   rows: TruthTableRow[];
-  variables: string[];
+  variables: string[]; 
   classification: Classification;
-  mainConnective: Operator | 'VAR' | 'CONST';
+  mainConnective: Operator | 'VAR';
   implicationForms?: ImplicationForms;
   kMapData?: KMapData;
-  rwResult?: RWResult;
-  stttTrace?: STTTTrace;
-  complexity?: ComplexityMetrics;
-  error?: string;
-  processingTime?: number;
+  error?: string; 
+  
+  // New properties
+  rightAway?: RightAwayResult;
+  complexity: ComplexityMetrics;
+  simplificationSteps?: SimplificationStep[];
+  sttt?: STTTReport;
 }
 
 export interface AppSettings {
   logic: {
-    negationHandling: 'preserve' | 'normalize' | 'simplify';
+    negationHandling: 'preserve' | 'normalize' | 'simplify'; 
     truthValues: '0/1' | 'F/T';
     rowOrder: '0→1' | '1→0';
   };
@@ -120,18 +149,13 @@ export interface AppSettings {
     highlightDependencies: boolean;
     dense: boolean;
   };
-  system: {
-    preventRefresh: boolean;
-    geminiApiKey: string;
-    enableAI: boolean;
-  };
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
   logic: {
     negationHandling: 'preserve',
     truthValues: '0/1',
-    rowOrder: '0→1',
+    rowOrder: '1→0',
   },
   table: {
     stickyHeaders: true,
@@ -139,23 +163,26 @@ export const DEFAULT_SETTINGS: AppSettings = {
     highlightDependencies: true,
     dense: false,
   },
-  system: {
-    preventRefresh: true,
-    geminiApiKey: '',
-    enableAI: false
-  }
 };
 
 export interface HistoryItem {
-  id: string;
-  expression: string;
-  timestamp: number;
-  classification?: string;
+    id: string;
+    expression: string;
+    variables: string[];
+    timestamp: number;
+    classification: Classification;
 }
 
 export interface ProofStep {
-  id: string;
-  content: string;
-  justification: string;
-  isAssumption: boolean;
+    id: string;
+    content: string;
+    justification: string;
+    isValid?: boolean;
+    error?: string;
+}
+
+export interface WorkspaceState {
+    premises: string; 
+    conclusion: string; 
+    steps: ProofStep[];
 }
