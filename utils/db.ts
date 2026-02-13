@@ -1,54 +1,65 @@
-import { HistoryItem } from '../types';
 
-export const DB_NAME = 'LogicFlowDB';
-export const STORE_NAME = 'history';
-export const DB_VERSION = 1;
+import { openDB, IDBPDatabase } from 'idb';
+import { HistoryItem, WorkspaceState } from '../types';
 
-const initDB = (): Promise<IDBDatabase> => {
-  return new Promise((resolve, reject) => {
-    const request = indexedDB.open(DB_NAME, DB_VERSION);
-    request.onupgradeneeded = (event) => {
-      const db = (event.target as IDBOpenDBRequest).result;
-      if (!db.objectStoreNames.contains(STORE_NAME)) {
-        db.createObjectStore(STORE_NAME, { keyPath: 'id' });
-      }
+const DB_NAME = 'logicflow-db';
+const DB_VERSION = 1;
+
+interface LogicFlowDB {
+    history: {
+        key: string;
+        value: HistoryItem;
     };
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error);
-  });
-};
+    workspace: {
+        key: string;
+        value: WorkspaceState;
+    };
+}
 
-export const saveHistory = async (item: HistoryItem) => {
-  try {
-    const db = await initDB();
-    const tx = db.transaction(STORE_NAME, 'readwrite');
-    tx.objectStore(STORE_NAME).put(item);
-  } catch (e) {
-    console.error("Failed to save history", e);
-  }
-};
+let dbPromise: Promise<IDBPDatabase<LogicFlowDB>>;
 
-export const getHistory = async (): Promise<HistoryItem[]> => {
-  try {
-    const db = await initDB();
-    return new Promise((resolve, reject) => {
-        const tx = db.transaction(STORE_NAME, 'readonly');
-        const store = tx.objectStore(STORE_NAME);
-        const request = store.getAll();
-        request.onsuccess = () => resolve(request.result.sort((a: HistoryItem, b: HistoryItem) => b.timestamp - a.timestamp));
-        request.onerror = () => reject(request.error);
+if (typeof window !== 'undefined') {
+    dbPromise = openDB<LogicFlowDB>(DB_NAME, DB_VERSION, {
+        upgrade(db) {
+            if (!db.objectStoreNames.contains('history')) {
+                const historyStore = db.createObjectStore('history', { keyPath: 'id' });
+                historyStore.createIndex('timestamp', 'timestamp');
+            }
+            if (!db.objectStoreNames.contains('workspace')) {
+                db.createObjectStore('workspace');
+            }
+        },
     });
-  } catch (e) {
-    return [];
-  }
-};
+}
 
-export const clearHistory = async () => {
-    try {
-        const db = await initDB();
-        const tx = db.transaction(STORE_NAME, 'readwrite');
-        tx.objectStore(STORE_NAME).clear();
-    } catch (e) {
-        console.error(e);
+export const db = {
+    async addHistory(item: HistoryItem) {
+        const db = await dbPromise;
+        return db.put('history', item);
+    },
+
+    async getHistory() {
+        const db = await dbPromise;
+        return db.getAllFromIndex('history', 'timestamp');
+    },
+
+    async deleteHistory(id: string) {
+        const db = await dbPromise;
+        return db.delete('history', id);
+    },
+    
+    async clearHistory() {
+        const db = await dbPromise;
+        return db.clear('history');
+    },
+
+    async saveWorkspace(state: WorkspaceState) {
+        const db = await dbPromise;
+        return db.put('workspace', state, 'current');
+    },
+
+    async getWorkspace() {
+        const db = await dbPromise;
+        return db.get('workspace', 'current');
     }
 };
