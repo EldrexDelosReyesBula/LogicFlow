@@ -1,8 +1,12 @@
+
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ASTNode, TruthTableRow } from '../types';
 import { Play, Pause, SkipForward, SkipBack, CheckCircle2, XCircle } from 'lucide-react';
 import { clsx } from 'clsx';
+
+// Fix for strict type checking on motion components
+const MotionDiv = motion.div as any;
 
 interface StepByStepProps {
   ast: ASTNode;
@@ -46,6 +50,10 @@ const StepByStep: React.FC<StepByStepProps> = ({ ast, row, onClose }) => {
 
     const evaluateNode = (node: ASTNode): boolean => {
        // Helper to just get value from row for display
+       // We assume row.values contains all sub-expressions keys or we recurse?
+       // logic.ts calculates all sub-expressions. 
+       // However, `row.values` keys are expressions strings.
+       // It's safer to use the expression string to look up the pre-calculated value.
        return row.values[node.expression]; 
     };
 
@@ -127,7 +135,7 @@ const StepByStep: React.FC<StepByStepProps> = ({ ast, row, onClose }) => {
 
          {/* Explanation Card */}
          <AnimatePresence mode="wait">
-            <motion.div 
+            <MotionDiv 
                 key={currentStepIndex}
                 initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
@@ -137,13 +145,13 @@ const StepByStep: React.FC<StepByStepProps> = ({ ast, row, onClose }) => {
                 <p className="text-slate-700 dark:text-slate-200 leading-relaxed font-medium">
                     {currentStep.explanation}
                 </p>
-            </motion.div>
+            </MotionDiv>
          </AnimatePresence>
       </div>
 
       {/* Progress Bar */}
       <div className="h-1 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden mt-6">
-          <motion.div 
+          <MotionDiv 
             className="h-full bg-primary-500"
             initial={{ width: 0 }}
             animate={{ width: `${((currentStepIndex + 1) / steps.length) * 100}%` }}

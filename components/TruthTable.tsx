@@ -1,50 +1,45 @@
+
 import React, { useState, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { clsx } from 'clsx';
-import { TruthTableRow, TableColumn, AppSettings, Classification } from '../types';
-import { Check, Edit2, Share2, FileSpreadsheet, FileText, Code, FileJson, Copy, ChevronDown } from 'lucide-react';
-import { exportToCSV, exportToExcel, exportToLaTeX, exportToMarkdown, exportToPDF } from '../utils/export';
+import { TruthTableRow, TableColumn, AppSettings } from '../types';
+import { Check } from 'lucide-react';
+
+const MotionDiv = motion.div as any;
 
 interface TruthTableProps {
   rows: TruthTableRow[];
   columns: TableColumn[];
   settings: AppSettings;
-  expression: string;
-  classification: Classification;
   onRowSelect?: (row: TruthTableRow) => void;
   onRowChange?: (row: TruthTableRow, changedCol: TableColumn) => void;
 }
 
-const TruthTable: React.FC<TruthTableProps> = ({ rows, columns, settings, expression, classification, onRowSelect, onRowChange }) => {
+const TruthTable: React.FC<TruthTableProps> = ({ rows, columns, settings, onRowSelect, onRowChange }) => {
   const [selectedRowId, setSelectedRowId] = useState<string | null>(null);
   const [copiedRowId, setCopiedRowId] = useState<string | null>(null);
   const [focusedColId, setFocusedColId] = useState<string | null>(null);
-  const [isExportMenuOpen, setIsExportMenuOpen] = useState(false);
   
-  // Resizing State
   const [colWidths, setColWidths] = useState<Record<string, number>>({});
   const resizingRef = useRef<{ id: string; startX: number; startWidth: number } | null>(null);
-
   const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Measure text to auto-resize columns
   const measureText = (text: string, isHeader: boolean) => {
     const canvas = document.createElement('canvas');
     const context = canvas.getContext('2d');
     if (!context) return text.length * 10;
     context.font = isHeader 
-        ? 'bold 14px "Plus Jakarta Sans", sans-serif' 
-        : '14px "JetBrains Mono", monospace';
+        ? 'bold 15px "Plus Jakarta Sans", sans-serif' 
+        : '15px "JetBrains Mono", monospace';
     return context.measureText(text).width;
   };
 
-  // Initialize and Auto-Resize widths
   useEffect(() => {
     const newWidths: Record<string, number> = {};
     columns.forEach(col => {
-        const headerWidth = measureText(col.label, true) + 40; 
-        const cellWidth = measureText(settings.logic.truthValues === 'F/T' ? 'F' : '0', false) + 40;
-        newWidths[col.id] = Math.max(headerWidth, cellWidth, col.isInput ? 56 : 80);
+        const headerWidth = measureText(col.label, true) + 48; 
+        const cellWidth = measureText(settings.logic.truthValues === 'F/T' ? 'F' : '0', false) + 48;
+        newWidths[col.id] = Math.max(headerWidth, cellWidth, col.isInput ? 64 : 100);
     });
     setColWidths(newWidths);
   }, [columns, settings.table.dense, settings.logic.truthValues]);
@@ -54,13 +49,11 @@ const TruthTable: React.FC<TruthTableProps> = ({ rows, columns, settings, expres
       return val ? '1' : '0';
   };
 
-  // --- Resizing Logic ---
   const startResize = (e: React.PointerEvent, colId: string) => {
       e.preventDefault();
       e.stopPropagation();
       const currentWidth = colWidths[colId] || 64;
       resizingRef.current = { id: colId, startX: e.clientX, startWidth: currentWidth };
-      
       document.addEventListener('pointermove', handleResizeMove);
       document.addEventListener('pointerup', stopResize);
   };
@@ -69,9 +62,7 @@ const TruthTable: React.FC<TruthTableProps> = ({ rows, columns, settings, expres
       if (!resizingRef.current) return;
       const { id, startX, startWidth } = resizingRef.current;
       const diff = e.clientX - startX;
-      const newWidth = Math.max(40, startWidth + diff);
-      
-      setColWidths(prev => ({ ...prev, [id]: newWidth }));
+      setColWidths(prev => ({ ...prev, [id]: Math.max(50, startWidth + diff) }));
   };
 
   const stopResize = () => {
@@ -79,8 +70,6 @@ const TruthTable: React.FC<TruthTableProps> = ({ rows, columns, settings, expres
       document.removeEventListener('pointermove', handleResizeMove);
       document.removeEventListener('pointerup', stopResize);
   };
-
-  // --- Interaction Logic ---
 
   const handleTouchStart = (row: TruthTableRow) => {
     longPressTimer.current = setTimeout(() => {
@@ -131,142 +120,84 @@ const TruthTable: React.FC<TruthTableProps> = ({ rows, columns, settings, expres
       if (col.id === focusedColId) return 1;
       const focusedCol = columns.find(c => c.id === focusedColId);
       if (focusedCol && focusedCol.dependencyIds?.includes(col.astId || '')) return 1;
-      return 0.2; 
+      return 0.3;
   };
 
-  // --- Export Handlers ---
-  const valType = settings.logic.truthValues;
-  const handleExport = (type: 'csv' | 'md' | 'latex' | 'excel' | 'pdf') => {
-      switch(type) {
-          case 'csv': exportToCSV(rows, columns, valType); break;
-          case 'md': exportToMarkdown(rows, columns, valType); break;
-          case 'latex': exportToLaTeX(rows, columns, valType); break;
-          case 'excel': exportToExcel(rows, columns, valType); break;
-          case 'pdf': exportToPDF(rows, columns, expression, classification, valType); break;
-      }
-      setIsExportMenuOpen(false);
-  };
+  const inputCols = columns.filter(c => c.isInput);
+  const lastInputColId = inputCols.length > 0 ? inputCols[inputCols.length - 1].id : null;
 
   return (
-    <div className="w-full h-full flex flex-col bg-surface-50 dark:bg-slate-900 overflow-hidden relative">
-      
-      {/* Floating Export Button */}
-      <div className="absolute top-2 right-4 z-30">
-        <div className="relative">
-            <button 
-                onClick={() => setIsExportMenuOpen(!isExportMenuOpen)}
-                className="flex items-center gap-2 px-3 py-1.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg shadow-sm hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors text-sm font-medium text-slate-700 dark:text-slate-200"
-            >
-                <Share2 className="w-4 h-4" />
-                <span>Export</span>
-                <ChevronDown className="w-3 h-3 opacity-50" />
-            </button>
-
-            <AnimatePresence>
-                {isExportMenuOpen && (
-                    <motion.div
-                        initial={{ opacity: 0, y: 10, scale: 0.95 }}
-                        animate={{ opacity: 1, y: 0, scale: 1 }}
-                        exit={{ opacity: 0, scale: 0.95 }}
-                        className="absolute right-0 top-full mt-2 w-48 bg-white dark:bg-slate-800 rounded-xl shadow-xl border border-slate-100 dark:border-slate-700 overflow-hidden z-40 p-1"
-                    >
-                         <button onClick={() => handleExport('excel')} className="w-full flex items-center gap-3 px-3 py-2.5 text-sm text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700 rounded-lg">
-                            <FileSpreadsheet className="w-4 h-4 text-green-600" /> Excel (.xlsx)
-                        </button>
-                        <button onClick={() => handleExport('pdf')} className="w-full flex items-center gap-3 px-3 py-2.5 text-sm text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700 rounded-lg">
-                            <FileText className="w-4 h-4 text-red-500" /> PDF Report
-                        </button>
-                        <div className="h-[1px] bg-slate-100 dark:bg-slate-700 my-1" />
-                        <button onClick={() => handleExport('csv')} className="w-full flex items-center gap-3 px-3 py-2.5 text-sm text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700 rounded-lg">
-                            <Copy className="w-4 h-4" /> Copy CSV
-                        </button>
-                        <button onClick={() => handleExport('md')} className="w-full flex items-center gap-3 px-3 py-2.5 text-sm text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700 rounded-lg">
-                            <FileJson className="w-4 h-4" /> Copy Markdown
-                        </button>
-                         <button onClick={() => handleExport('latex')} className="w-full flex items-center gap-3 px-3 py-2.5 text-sm text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700 rounded-lg">
-                            <Code className="w-4 h-4" /> Copy LaTeX
-                        </button>
-                    </motion.div>
-                )}
-            </AnimatePresence>
-            
-            {isExportMenuOpen && (
-                <div className="fixed inset-0 z-20" onClick={() => setIsExportMenuOpen(false)} />
-            )}
-        </div>
-      </div>
-
-      <div className="flex-1 overflow-auto no-scrollbar pb-32 w-full pt-1">
+    <div className="w-full h-full flex flex-col bg-surface-100 dark:bg-dark-container overflow-hidden">
+      <div className="flex-1 overflow-auto no-scrollbar pb-32 w-full">
         <div className="min-w-max inline-block align-middle">
            
            {/* Header */}
            <div className={clsx(
-               "z-10 bg-white/95 dark:bg-slate-900/95 backdrop-blur-md border-b border-surface-200 dark:border-surface-800 flex shadow-sm",
+               "z-10 bg-surface-100/95 dark:bg-dark-container/95 backdrop-blur-md flex border-b border-surface-300 dark:border-white/5",
                settings.table.stickyHeaders ? "sticky top-0" : ""
            )}>
               {columns.map((col, i) => {
                   const width = colWidths[col.id] || (col.isInput ? 64 : 120);
                   const opacity = settings.table.highlightDependencies ? getOpacity(col) : 1;
+                  const isLastInput = col.id === lastInputColId;
 
                   return (
-                    <motion.div 
+                    <MotionDiv 
                         layout
                         key={col.id}
-                        style={{ width: width, opacity }}
+                        initial={false}
+                        animate={{ width: width, opacity }}
+                        transition={{ type: "spring", stiffness: 300, damping: 30 }}
                         onClick={() => toggleColFocus(col.id)}
                         className={clsx(
-                            "relative py-3 px-2 flex-shrink-0 flex items-center justify-center transition-all cursor-pointer select-none group",
+                            "relative py-4 px-3 flex-shrink-0 flex items-center justify-center transition-all cursor-pointer select-none group first:pl-6 last:pr-6",
                             col.isInput 
-                                ? "bg-gradient-to-b from-slate-50 to-slate-100 dark:from-slate-800 dark:to-slate-900" 
+                                ? "bg-surface-200/50 dark:bg-white/5" 
                                 : col.isOutput 
-                                    ? "bg-primary-50/50 dark:bg-primary-900/20" 
-                                    : "bg-white dark:bg-slate-900"
+                                    ? "bg-primary-50/50 dark:bg-primary-900/10" 
+                                    : ""
                         )}
                     >
-                        {col.isInput && i === columns.filter(c=>c.isInput).length - 1 && (
-                            <div className="absolute right-0 top-0 bottom-0 w-[4px] border-r-2 border-double border-slate-300 dark:border-slate-700 z-10" />
+                        {/* Divider for last input column */}
+                        {isLastInput && (
+                            <div className="absolute right-0 top-3 bottom-3 w-[2px] bg-gradient-to-b from-transparent via-primary-500/30 dark:via-primary-400/30 to-transparent z-10" />
                         )}
 
-                        <div className="flex items-center gap-1">
+                        <div className="flex items-center gap-1.5">
                             <span className={clsx(
-                                "text-sm font-bold font-display truncate text-center",
+                                "text-base font-extrabold font-display truncate text-center",
                                 col.isOutput ? "text-primary-700 dark:text-primary-300" : 
-                                col.isInput ? "text-slate-800 dark:text-slate-200" : "text-slate-500 dark:text-slate-400"
+                                col.isInput ? "text-surface-800 dark:text-surface-200" : "text-surface-500 dark:text-surface-400"
                             )}>
                                 {col.label}
                             </span>
-                            <Edit2 className="w-3 h-3 text-slate-400 opacity-0 group-hover:opacity-100 transition-opacity" />
                         </div>
 
                         <div 
                             onPointerDown={(e) => startResize(e, col.id)}
-                            className="absolute right-0 top-0 bottom-0 w-3 cursor-col-resize hover:bg-slate-200/50 dark:hover:bg-slate-700/50 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity z-20"
+                            className="absolute right-0 top-0 bottom-0 w-6 cursor-col-resize flex items-center justify-center opacity-0 group-hover:opacity-100 z-20 hover:opacity-100"
                         >
-                            <div className="w-[1px] h-4 bg-slate-400 dark:bg-slate-500" />
+                            <div className="w-1.5 h-6 rounded-full bg-surface-400/50 dark:bg-surface-500/50" />
                         </div>
-                    </motion.div>
+                    </MotionDiv>
                   );
               })}
            </div>
 
            {/* Body */}
-           <div className="divide-y divide-slate-100 dark:divide-slate-800">
+           <div className="divide-y divide-surface-200/80 dark:divide-white/5">
              {rows.map((row, i) => {
                 const isSelected = selectedRowId === row.id;
                 const isCopied = copiedRowId === row.id;
                 const finalVal = row.values[columns[columns.length-1].expression];
                 
                 return (
-                  <motion.div
+                  <MotionDiv
                     layout
                     key={row.id}
-                    initial={{ opacity: 0, y: 15 }}
+                    initial={{ opacity: 0, y: 10 }}
                     animate={{ opacity: 1, y: 0 }}
-                    transition={{ 
-                        delay: Math.min(i * 0.03, 0.8),
-                        duration: 0.4, 
-                        ease: [0.25, 1, 0.5, 1]
-                    }}
+                    transition={{ delay: Math.min(i * 0.03, 0.5), ease: "easeOut" }}
                     onClick={() => handleRowClick(row)}
                     onTouchStart={() => handleTouchStart(row)}
                     onTouchEnd={handleTouchEnd}
@@ -275,68 +206,68 @@ const TruthTable: React.FC<TruthTableProps> = ({ rows, columns, settings, expres
                     onMouseLeave={handleTouchEnd}
                     className={clsx(
                       "flex transition-colors duration-200 select-none relative group touch-manipulation",
-                      isSelected ? "bg-primary-50 dark:bg-primary-900/40" : "hover:bg-slate-50 dark:hover:bg-slate-800",
-                      finalVal ? "bg-white dark:bg-slate-900" : "bg-slate-50/50 dark:bg-slate-900/50"
+                      isSelected 
+                        ? "bg-primary-100 dark:bg-primary-900/30" 
+                        : finalVal 
+                            ? "bg-surface-50 dark:bg-dark-containerHigh" 
+                            : "bg-surface-100 dark:bg-dark-container"
                     )}
                   >
                     {columns.map((col, colIdx) => {
                         const val = row.values[col.expression];
                         const width = colWidths[col.id] || (col.isInput ? 64 : 120);
                         const opacity = settings.table.highlightDependencies ? getOpacity(col) : 1;
-                        
-                        const isEditable = true; 
+                        const isLastInput = col.id === lastInputColId;
 
                         return (
-                            <motion.div 
+                            <MotionDiv 
                                 layout
+                                initial={false}
+                                animate={{ width: width, opacity }}
+                                transition={{ type: "spring", stiffness: 300, damping: 30 }}
                                 key={col.id} 
-                                style={{ width: width, opacity }}
-                                onClick={(e) => handleCellClick(e, row, col)}
+                                onClick={(e: React.MouseEvent) => handleCellClick(e, row, col)}
                                 className={clsx(
-                                    "relative py-3.5 px-2 flex items-center justify-center flex-shrink-0 transition-opacity",
-                                    col.isInput 
-                                        ? "bg-slate-50/30 dark:bg-slate-800/10" 
-                                        : "",
-                                    isEditable ? "cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800 active:scale-95 transition-transform" : ""
+                                    "relative py-4 px-2 flex items-center justify-center flex-shrink-0 transition-opacity first:pl-6 last:pr-6",
+                                    "cursor-pointer hover:bg-black/5 dark:hover:bg-white/5 active:scale-95 transition-transform origin-center"
                                 )}
                             >
-                                {col.isInput && colIdx === columns.filter(c=>c.isInput).length - 1 && (
-                                    <div className="absolute right-0 top-0 bottom-0 w-[4px] border-r-2 border-double border-slate-200 dark:border-slate-800" />
+                                {isLastInput && (
+                                    <div className="absolute right-0 top-0 bottom-0 w-[2px] bg-gradient-to-b from-transparent via-surface-400/20 dark:via-white/10 to-transparent pointer-events-none" />
                                 )}
 
                                 <span className={clsx(
                                     "font-mono transition-all",
-                                    col.isOutput ? "text-lg font-bold" : col.isInput ? "text-base" : "text-sm",
+                                    col.isOutput ? "text-xl font-bold" : "text-lg",
                                     val 
-                                      ? (col.isOutput ? "text-primary-600 dark:text-primary-400" : "text-slate-900 dark:text-white font-medium") 
-                                      : (col.isOutput ? "text-slate-400 dark:text-slate-600" : "text-slate-400 dark:text-slate-600")
+                                      ? (col.isOutput ? "text-primary-700 dark:text-primary-300" : "text-surface-900 dark:text-white font-semibold") 
+                                      : "text-surface-400 dark:text-surface-600"
                                 )}>
-                                    {col.isOutput && isCopied ? <Check className="w-5 h-5 text-green-500 scale-125" /> : displayValue(val)}
+                                    {col.isOutput && isCopied ? <Check className="w-6 h-6 text-green-600 scale-125" /> : displayValue(val)}
                                 </span>
-                            </motion.div>
+                            </MotionDiv>
                         );
                     })}
-                  </motion.div>
+                  </MotionDiv>
                 );
              })}
            </div>
         </div>
       </div>
       
-      {/* Copied Toast */}
       <AnimatePresence>
         {copiedRowId && (
-            <motion.div 
+            <MotionDiv 
                 initial={{ opacity: 0, y: 20, scale: 0.9 }}
                 animate={{ opacity: 1, y: 0, scale: 1 }}
                 exit={{ opacity: 0, scale: 0.9 }}
-                className="fixed bottom-8 left-1/2 -translate-x-1/2 bg-slate-900 dark:bg-white text-white dark:text-slate-900 px-6 py-3 rounded-full text-sm font-bold shadow-2xl pointer-events-none z-50 flex items-center gap-3 backdrop-blur-xl"
+                className="fixed bottom-8 left-1/2 -translate-x-1/2 bg-surface-800 dark:bg-surface-100 text-white dark:text-surface-900 px-8 py-4 rounded-full text-base font-bold shadow-2xl pointer-events-none z-50 flex items-center gap-3"
             >
-                <div className="bg-green-500 rounded-full p-1">
-                    <Check className="w-3 h-3 text-white stroke-[4]" />
+                <div className="bg-green-400 text-surface-900 rounded-full p-1">
+                    <Check className="w-4 h-4 stroke-[4]" />
                 </div>
-                <span>Row Copied!</span>
-            </motion.div>
+                <span>Row Copied</span>
+            </MotionDiv>
         )}
       </AnimatePresence>
     </div>

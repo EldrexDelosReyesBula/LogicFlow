@@ -1,7 +1,12 @@
+
 import React, { useState, useRef, useEffect } from 'react';
 import { clsx } from 'clsx';
-import { Check, Plus, X } from 'lucide-react';
+import { Plus } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
+
+// Fix for strict type checking on motion components
+const MotionButton = motion.button as any;
+const MotionForm = motion.form as any;
 
 interface VariableSelectorProps {
   selected: string[];
@@ -33,7 +38,7 @@ const VariableSelector: React.FC<VariableSelectorProps> = ({ selected, suggested
   const handleAddSubmit = (e?: React.FormEvent) => {
     e?.preventDefault();
     const v = newVar.trim().toUpperCase();
-    if (v && /^[A-Z][0-9]*$/.test(v)) { // Simple validation
+    if (v && /^[A-Z][0-9]*$/.test(v)) {
         if (!selected.includes(v)) {
             onChange([...selected, v].sort());
         }
@@ -50,82 +55,80 @@ const VariableSelector: React.FC<VariableSelectorProps> = ({ selected, suggested
       }
   };
 
-  // Combine and deduplicate logic
-  const allVars = Array.from(new Set([...PRESETS, ...selected, ...suggested])).sort();
+  // Combine presets and any selected variables that aren't in presets (to persist custom ones)
+  const displayVars = Array.from(new Set([...PRESETS, ...selected])).sort();
 
   return (
-    <div className="w-full max-w-3xl mx-auto px-4 mb-4">
-      <div className="flex flex-col gap-3">
-        <label className="text-xs font-bold uppercase tracking-wider text-slate-500 ml-1">
-          1. Declare Propositions
+    <div className="w-full max-w-2xl mx-auto px-1 mb-2">
+      <div className="flex flex-col items-center gap-4">
+        <label className="text-[10px] font-bold uppercase tracking-[0.2em] text-surface-500 dark:text-surface-400">
+          Propositions
         </label>
         
-        <div className="flex flex-wrap gap-2">
+        <div className="flex flex-wrap justify-center gap-3">
           <AnimatePresence>
-            {allVars.map((v) => {
+            {displayVars.map((v) => {
                 const isActive = selected.includes(v);
-                const isSuggested = !isActive && suggested.includes(v);
 
                 return (
-                <motion.button
+                <MotionButton
                     layout
                     key={v}
                     initial={{ opacity: 0, scale: 0.8 }}
                     animate={{ opacity: 1, scale: 1 }}
                     exit={{ opacity: 0, scale: 0.8 }}
+                    whileHover={{ scale: 1.05 }}
+                    whileTap={{ scale: 0.95 }}
                     onClick={() => toggleVar(v)}
                     className={clsx(
-                    "w-12 h-12 rounded-xl text-lg font-mono font-bold transition-all flex items-center justify-center relative",
+                    "w-14 h-14 rounded-2xl text-xl font-bold transition-all flex items-center justify-center relative border shadow-sm",
                     isActive 
-                        ? "bg-slate-900 text-white shadow-md dark:bg-white dark:text-slate-900 z-10" 
-                        : isSuggested
-                            ? "bg-primary-50 text-primary-600 border-2 border-primary-300 dark:bg-primary-900/20 dark:text-primary-300 dark:border-primary-700 animate-pulse"
-                            : "bg-white text-slate-400 border border-slate-200 dark:bg-slate-800 dark:border-slate-700 hover:border-slate-300"
+                        ? "bg-[#1e1e1e] dark:bg-surface-800 text-white border-white/10 shadow-lg shadow-black/20" 
+                        : "bg-surface-100 dark:bg-white/5 text-surface-600 dark:text-surface-400 border-surface-200 dark:border-white/5 hover:bg-surface-200 dark:hover:bg-white/10"
                     )}
                 >
                     {v}
                     {isActive && (
-                        <motion.div 
-                            initial={{ scale: 0 }} animate={{ scale: 1 }}
-                            className="absolute -top-1 -right-1 w-4 h-4 bg-primary-500 rounded-full flex items-center justify-center border-2 border-surface-50 dark:border-slate-900"
-                        >
-                            <Check className="w-2.5 h-2.5 text-white stroke-[3]" />
-                        </motion.div>
+                        <motion.div
+                            layoutId="active-indicator"
+                            className="absolute -top-1 -right-1 w-3 h-3 bg-primary-500 rounded-full border-2 border-white dark:border-[#1e1e1e]"
+                        />
                     )}
-                </motion.button>
+                </MotionButton>
                 );
             })}
           </AnimatePresence>
           
-          {/* Add Button / Input */}
           <div className="relative">
              {!isAdding ? (
-                 <motion.button
+                 <MotionButton
                     layout
                     onClick={() => setIsAdding(true)}
-                    className="w-12 h-12 rounded-xl flex items-center justify-center bg-slate-50 dark:bg-slate-800 border border-dashed border-slate-300 dark:border-slate-600 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 hover:border-slate-400 transition-colors"
+                    whileHover={{ scale: 1.05 }}
+                    whileTap={{ scale: 0.95 }}
+                    className="w-14 h-14 rounded-2xl flex items-center justify-center bg-surface-100 dark:bg-white/5 border border-surface-200 dark:border-white/5 text-surface-600 dark:text-surface-400 hover:bg-surface-200 dark:hover:bg-white/10 transition-colors"
                  >
-                    <Plus className="w-5 h-5" />
-                 </motion.button>
+                    <Plus className="w-6 h-6" />
+                 </MotionButton>
              ) : (
-                 <motion.form
+                 <MotionForm
                     layout
-                    initial={{ width: '3rem', opacity: 0 }}
-                    animate={{ width: '6rem', opacity: 1 }}
+                    initial={{ width: '3.5rem', opacity: 0 }}
+                    animate={{ width: '4.5rem', opacity: 1 }}
                     onSubmit={handleAddSubmit}
-                    className="h-12 bg-white dark:bg-slate-800 rounded-xl border-2 border-primary-500 flex items-center overflow-hidden shadow-sm"
+                    className="h-14 bg-[#1e1e1e] dark:bg-surface-800 rounded-2xl border border-white/20 flex items-center overflow-hidden shadow-sm"
                  >
                     <input 
                         ref={inputRef}
                         type="text" 
                         value={newVar}
-                        onChange={e => setNewVar(e.target.value.toUpperCase().slice(0, 1))} // Single char for simplicity
+                        onChange={e => setNewVar(e.target.value.toUpperCase().slice(0, 1))} 
                         onBlur={() => !newVar && setIsAdding(false)}
                         onKeyDown={handleKeyDown}
-                        className="w-full h-full text-center font-mono font-bold bg-transparent outline-none uppercase text-slate-900 dark:text-white"
+                        className="w-full h-full text-center font-bold text-xl bg-transparent outline-none uppercase text-white"
                         placeholder="?"
                     />
-                 </motion.form>
+                 </MotionForm>
              )}
           </div>
         </div>
