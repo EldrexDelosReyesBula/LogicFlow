@@ -1,15 +1,16 @@
+
 import React from 'react';
 import { clsx } from 'clsx';
 import { AppSettings } from '../types';
-import { Check, Download, ShieldAlert, Cpu } from 'lucide-react';
-import { getHistory } from '../utils/db';
+import { Check, Download, Shield, FileText } from 'lucide-react';
 
 interface SettingsSheetProps {
   settings: AppSettings;
   onUpdate: (s: AppSettings) => void;
+  installPrompt?: any;
 }
 
-const SettingsSheet: React.FC<SettingsSheetProps> = ({ settings, onUpdate }) => {
+const SettingsSheet: React.FC<SettingsSheetProps> = ({ settings, onUpdate, installPrompt }) => {
   
   const updateLogic = (key: keyof AppSettings['logic'], val: any) => {
     onUpdate({ ...settings, logic: { ...settings.logic, [key]: val } });
@@ -19,141 +20,59 @@ const SettingsSheet: React.FC<SettingsSheetProps> = ({ settings, onUpdate }) => 
     onUpdate({ ...settings, table: { ...settings.table, [key]: val } });
   };
 
-  const updateSystem = (key: keyof AppSettings['system'], val: any) => {
-    onUpdate({ ...settings, system: { ...settings.system, [key]: val } });
+  const handleInstall = () => {
+      if (installPrompt) {
+          installPrompt.prompt();
+          installPrompt.userChoice.then((choiceResult: any) => {
+              if (choiceResult.outcome === 'accepted') {
+                  console.log('User accepted the install prompt');
+              }
+          });
+      }
   };
-
-  const handleDownload = async () => {
-    try {
-        const history = await getHistory();
-        const data = {
-            settings,
-            history,
-            timestamp: new Date().toISOString(),
-            version: "5.0.0"
-        };
-        
-        const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `logicflow-backup-${new Date().toISOString().slice(0,10)}.json`;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
-    } catch (e) {
-        console.error("Download failed", e);
-        alert("Failed to download workspace data.");
-    }
-  };
-
+  
   return (
     <div className="p-6 pb-20 space-y-8">
       
-      {/* System Settings */}
-      <section>
-        <h3 className="text-sm font-bold uppercase tracking-wider text-slate-500 mb-3">System & Security</h3>
-        <div className="space-y-3">
-            <button 
-                onClick={() => updateSystem('preventRefresh', !settings.system.preventRefresh)}
-                className="w-full flex items-center justify-between p-4 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl transition-colors hover:bg-slate-50 dark:hover:bg-slate-700/50"
-            >
-                <div className="flex items-center gap-3">
-                    <ShieldAlert className="w-5 h-5 text-slate-500" />
-                    <span className="text-sm font-medium text-slate-900 dark:text-white">Prevent Accidental Refresh</span>
-                </div>
-                <div className={clsx(
-                    "w-10 h-6 rounded-full relative transition-colors",
-                    settings.system.preventRefresh ? "bg-primary-500" : "bg-slate-300 dark:bg-slate-600"
-                )}>
-                    <div className={clsx(
-                        "absolute top-1 w-4 h-4 rounded-full bg-white transition-all shadow-sm",
-                        settings.system.preventRefresh ? "left-5" : "left-1"
-                    )} />
-                </div>
-            </button>
+      {/* App Installation */}
+      {installPrompt && (
+          <section>
+              <button 
+                onClick={handleInstall}
+                className="w-full py-4 bg-primary-600 text-white rounded-2xl font-bold flex items-center justify-center gap-3 shadow-lg shadow-primary-900/20 active:scale-95 transition-transform"
+              >
+                  <Download className="w-5 h-5" />
+                  Install App (PWA)
+              </button>
+          </section>
+      )}
 
-            <button 
-                onClick={handleDownload}
-                className="w-full flex items-center justify-between p-4 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl transition-colors hover:bg-slate-50 dark:hover:bg-slate-700/50"
-            >
-                <div className="flex items-center gap-3">
-                    <Download className="w-5 h-5 text-slate-500" />
-                    <span className="text-sm font-medium text-slate-900 dark:text-white">Download Workspace Data</span>
-                </div>
-                <span className="text-xs font-bold text-primary-600 dark:text-primary-400 bg-primary-50 dark:bg-primary-900/30 px-2 py-1 rounded">JSON</span>
-            </button>
-        </div>
-      </section>
-
-      {/* AI Settings */}
+      {/* Negation Handling */}
       <section>
-        <h3 className="text-sm font-bold uppercase tracking-wider text-slate-500 mb-3">Gemini AI Integration</h3>
-        <div className="space-y-3">
-            <div className="p-4 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl">
-                <div className="flex items-center gap-3 mb-3">
-                    <Cpu className="w-5 h-5 text-slate-500" />
-                    <span className="text-sm font-medium text-slate-900 dark:text-white">Gemini API Key</span>
-                </div>
-                <input 
-                    type="password"
-                    value={settings.system.geminiApiKey || ''}
-                    onChange={(e) => updateSystem('geminiApiKey', e.target.value)}
-                    placeholder="Enter your API Key..."
-                    className="w-full p-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg text-sm font-mono outline-none focus:border-primary-500"
-                />
-                <p className="text-xs text-slate-400 mt-2">Required for AI explanations. Stored locally.</p>
-            </div>
-            
-            <button 
-                onClick={() => updateSystem('enableAI', !settings.system.enableAI)}
-                disabled={!settings.system.geminiApiKey}
-                className={clsx(
-                    "w-full flex items-center justify-between p-4 border rounded-xl transition-colors",
-                    settings.system.geminiApiKey 
-                        ? "bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 hover:bg-slate-50" 
-                        : "bg-slate-100 dark:bg-slate-800/50 border-transparent opacity-50 cursor-not-allowed"
-                )}
-            >
-                <span className="text-sm font-medium text-slate-900 dark:text-white">Enable AI Features</span>
-                <div className={clsx(
-                    "w-6 h-6 rounded-full border flex items-center justify-center transition-colors",
-                    settings.system.enableAI ? "bg-primary-600 border-primary-600" : "border-slate-300"
-                )}>
-                    {settings.system.enableAI && <Check className="w-4 h-4 text-white" />}
-                </div>
-            </button>
-        </div>
-      </section>
-
-      {/* Table Options */}
-      <section>
-        <h3 className="text-sm font-bold uppercase tracking-wider text-slate-500 mb-3">Table View</h3>
-        <div className="space-y-2">
+        <h3 className="text-sm font-bold uppercase tracking-wider text-slate-500 mb-3">Negation Display</h3>
+        <div className="bg-surface-50 dark:bg-slate-800 rounded-xl p-1 grid grid-cols-3 gap-1">
             {[
-                { id: 'showSubExpressions', label: 'Show intermediate steps' },
-                { id: 'stickyHeaders', label: 'Sticky headers' },
-                { id: 'highlightDependencies', label: 'Highlight dependencies on click' },
-                { id: 'dense', label: 'Compact view' },
+                { id: 'preserve', label: 'Preserve', sub: '--A' },
+                { id: 'normalize', label: 'Normalize', sub: '¬¬A' },
+                { id: 'simplify', label: 'Simplify', sub: 'A' },
             ].map((opt) => (
-                <button 
+                <button
                     key={opt.id}
-                    onClick={() => updateTable(opt.id as any, !settings.table[opt.id as keyof AppSettings['table']])}
-                    className="w-full flex items-center justify-between p-4 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl transition-colors hover:bg-slate-50 dark:hover:bg-slate-700/50"
+                    onClick={() => updateLogic('negationHandling', opt.id)}
+                    className={clsx(
+                        "py-3 rounded-lg text-sm font-medium transition-all flex flex-col items-center",
+                        settings.logic.negationHandling === opt.id 
+                            ? "bg-white dark:bg-slate-700 shadow-sm text-primary-600 dark:text-primary-400" 
+                            : "text-slate-500 hover:bg-white/50"
+                    )}
                 >
-                    <span className="text-sm font-medium text-slate-900 dark:text-white">{opt.label}</span>
-                    <div className={clsx(
-                        "w-6 h-6 rounded-full border flex items-center justify-center transition-colors",
-                        settings.table[opt.id as keyof AppSettings['table']] ? "bg-primary-600 border-primary-600" : "border-slate-300"
-                    )}>
-                        {settings.table[opt.id as keyof AppSettings['table']] && <Check className="w-4 h-4 text-white" />}
-                    </div>
+                    <span>{opt.label}</span>
+                    <span className="text-[10px] font-mono opacity-60 mt-0.5">{opt.sub}</span>
                 </button>
             ))}
         </div>
       </section>
-      
+
       {/* Row Order & Truth Values */}
       <section className="grid grid-cols-2 gap-4">
         <div>
@@ -194,6 +113,43 @@ const SettingsSheet: React.FC<SettingsSheetProps> = ({ settings, onUpdate }) => 
                 ))}
             </div>
         </div>
+      </section>
+
+      {/* Table Options */}
+      <section>
+        <h3 className="text-sm font-bold uppercase tracking-wider text-slate-500 mb-3">Table View</h3>
+        <div className="space-y-2">
+            {[
+                { id: 'showSubExpressions', label: 'Show intermediate steps' },
+                { id: 'stickyHeaders', label: 'Sticky headers' },
+                { id: 'highlightDependencies', label: 'Highlight dependencies on click' },
+                { id: 'dense', label: 'Compact view' },
+            ].map((opt) => (
+                <button 
+                    key={opt.id}
+                    onClick={() => updateTable(opt.id as any, !settings.table[opt.id as keyof AppSettings['table']])}
+                    className="w-full flex items-center justify-between p-4 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl transition-colors hover:bg-slate-50 dark:hover:bg-slate-700/50"
+                >
+                    <span className="text-sm font-medium text-slate-900 dark:text-white">{opt.label}</span>
+                    <div className={clsx(
+                        "w-6 h-6 rounded-full border flex items-center justify-center transition-colors",
+                        settings.table[opt.id as keyof AppSettings['table']] ? "bg-primary-600 border-primary-600" : "border-slate-300"
+                    )}>
+                        {settings.table[opt.id as keyof AppSettings['table']] && <Check className="w-4 h-4 text-white" />}
+                    </div>
+                </button>
+            ))}
+        </div>
+      </section>
+
+      {/* Legal & About */}
+      <section className="grid grid-cols-2 gap-3 pt-4">
+           <button className="py-3 bg-surface-100 dark:bg-white/5 rounded-xl text-sm font-bold text-slate-600 dark:text-slate-400 flex items-center justify-center gap-2">
+               <Shield className="w-4 h-4" /> Privacy Policy
+           </button>
+           <button className="py-3 bg-surface-100 dark:bg-white/5 rounded-xl text-sm font-bold text-slate-600 dark:text-slate-400 flex items-center justify-center gap-2">
+               <FileText className="w-4 h-4" /> Terms of Use
+           </button>
       </section>
 
     </div>
